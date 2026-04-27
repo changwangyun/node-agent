@@ -53,12 +53,17 @@ func (h *Handler) Deploy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Server == "" || req.Port == 0 {
-		writeError(w, http.StatusBadRequest, "missing required fields: server, port")
+	if req.Port == 0 {
+		writeError(w, http.StatusBadRequest, "missing required field: port")
 		return
 	}
 
-	if err := h.generator.GenerateAndWrite(&req); err != nil {
+	if req.Server == "" {
+		req.Server = "0.0.0.0"
+	}
+
+	clientCfg, err := h.generator.GenerateAndWrite(&req)
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, "generate config failed: "+err.Error())
 		return
 	}
@@ -75,11 +80,30 @@ func (h *Handler) Deploy(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"success": true,
-		"message": fmt.Sprintf("deployed %s config for user %s", req.Protocol, req.UserID),
-		"node_id": req.NodeID,
-	})
+	response := map[string]interface{}{
+		"success":       true,
+		"message":       fmt.Sprintf("deployed %s config for user %s", req.Protocol, req.UserID),
+		"node_id":       req.NodeID,
+		"client_config": clientCfg,
+	}
+
+	writeJSON(w, http.StatusOK, response)
+}
+
+func (h *Handler) ClientConfig(w http.ResponseWriter, r *http.Request) {
+	userID := r.URL.Query().Get("user_id")
+	if userID == "" {
+		writeError(w, http.StatusBadRequest, "missing query parameter: user_id")
+		return
+	}
+
+	clientCfg, err := h.generator.GetClientConfig(userID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, clientCfg)
 }
 
 func (h *Handler) Status(w http.ResponseWriter, r *http.Request) {
