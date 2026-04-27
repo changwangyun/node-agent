@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-REPO="koeyx/node-agent"
+REPO="changwangyun/node-agent"
 INSTALL_DIR="/usr/local/bin"
 CONFIG_DIR="/etc/node-agent"
 SINGBOX_DIR="/etc/sing-box"
