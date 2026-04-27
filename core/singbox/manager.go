@@ -37,11 +37,12 @@ func (s ProcessState) String() string {
 }
 
 type Manager struct {
-	mu     sync.RWMutex
-	cmd    *exec.Cmd
-	cancel context.CancelFunc
-	state  ProcessState
-	cfg    *config.Config
+	mu        sync.RWMutex
+	cmd       *exec.Cmd
+	cancel    context.CancelFunc
+	state     ProcessState
+	cfg       *config.Config
+	hasConfig bool
 
 	startTime time.Time
 	crashCh   chan struct{}
@@ -78,8 +79,10 @@ func (m *Manager) Start() error {
 	if _, err := os.Stat(configPath); err != nil {
 		cancel()
 		m.setState(StateStopped)
-		return fmt.Errorf("sing-box config not found: %s", configPath)
+		return fmt.Errorf("sing-box config not found: %s (deploy a config first via POST /deploy)", configPath)
 	}
+
+	m.hasConfig = true
 
 	cmd := exec.CommandContext(ctx, binary, "run", "-c", configPath)
 	cmd.Dir = m.cfg.SingBox.WorkDir
@@ -203,6 +206,18 @@ func (m *Manager) GetPID() int {
 
 func (m *Manager) CrashChannel() <-chan struct{} {
 	return m.crashCh
+}
+
+func (m *Manager) ConfigExists() bool {
+	if m.hasConfig {
+		return true
+	}
+	_, err := os.Stat(m.cfg.SingBox.ConfigPath)
+	if err == nil {
+		m.hasConfig = true
+		return true
+	}
+	return false
 }
 
 func (m *Manager) setState(s ProcessState) {

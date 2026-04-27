@@ -246,6 +246,27 @@ install_singbox() {
 create_dirs() {
     info "创建目录..."
     mkdir -p "${CONFIG_DIR}" "${SINGBOX_DIR}" "${DATA_DIR}" "${LOG_DIR}"
+
+    if [ ! -f "${SINGBOX_DIR}/config.json" ]; then
+        cat > "${SINGBOX_DIR}/config.json" << 'SBEOF'
+{
+  "log": { "level": "info" },
+  "dns": {
+    "servers": [
+      { "tag": "google", "address": "tls://8.8.8.8" },
+      { "tag": "local", "address": "223.5.5.5", "detour": "direct" }
+    ]
+  },
+  "inbounds": [],
+  "outbounds": [
+    { "tag": "direct", "type": "direct" }
+  ]
+}
+SBEOF
+        ok "sing-box 占位配置已创建: ${SINGBOX_DIR}/config.json"
+        warn "此为占位配置，请通过 POST /deploy 部署实际协议配置"
+    fi
+
     ok "目录已创建"
 }
 

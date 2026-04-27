@@ -134,7 +134,7 @@ func startWatchdog(mgr *singbox.Manager, cfg *config.Config) {
 	defer ticker.Stop()
 
 	for range ticker.C {
-		if !mgr.IsRunning() {
+		if !mgr.IsRunning() && mgr.ConfigExists() {
 			state := mgr.GetState()
 			if state == singbox.StateCrashed {
 				log.Println("[watchdog] sing-box crashed, attempting restart...")
