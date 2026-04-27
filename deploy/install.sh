@@ -260,7 +260,11 @@ create_dirs() {
   "inbounds": [],
   "outbounds": [
     { "tag": "direct", "type": "direct" }
-  ]
+  ],
+  "route": {
+    "default_domain_resolver": "google",
+    "final": "direct"
+  }
 }
 SBEOF
         ok "sing-box 占位配置已创建: ${SINGBOX_DIR}/config.json"

@@ -127,8 +127,9 @@ type TransportConfig struct {
 }
 
 type RouteConfig struct {
-	Rules []RouteRule `json:"rules,omitempty"`
-	Final string      `json:"final"`
+	Rules                 []RouteRule `json:"rules,omitempty"`
+	DefaultDomainResolver string      `json:"default_domain_resolver,omitempty"`
+	Final                 string      `json:"final"`
 }
 
 type RouteRule struct {
@@ -211,7 +212,8 @@ func (g *Generator) generate(req *DeployRequest) (*SingBoxConfig, error) {
 					Outbound: "dns-out",
 				},
 			},
-			Final: "proxy",
+			DefaultDomainResolver: "google",
+			Final:                 "proxy",
 		},
 	}
 
@@ -404,7 +406,8 @@ func (g *Generator) generateDefault() *SingBoxConfig {
 			{Type: "direct", Tag: "direct"},
 		},
 		Route: &RouteConfig{
-			Final: "direct",
+			DefaultDomainResolver: "google",
+			Final:                 "direct",
 		},
 	}
 }
