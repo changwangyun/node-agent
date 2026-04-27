@@ -14,6 +14,11 @@ type TrafficData struct {
 	Download int64 `json:"download"`
 }
 
+type SpeedData struct {
+	Upload   int64 `json:"upload"`
+	Download int64 `json:"download"`
+}
+
 type ConnectionData struct {
 	ActiveConnections int `json:"active_connections"`
 }
@@ -28,6 +33,7 @@ type OnlineUser struct {
 
 type StatsResult struct {
 	Traffic     TrafficData    `json:"traffic"`
+	Speed       SpeedData      `json:"speed"`
 	Connections ConnectionData `json:"connections"`
 }
 
@@ -43,8 +49,8 @@ type SingBoxStatsCollector struct {
 	secret  string
 	client  *http.Client
 
-	lastTraffic  *TrafficData
-	totalTraffic *TrafficData
+	lastConnTraffic *TrafficData
+	totalTraffic    *TrafficData
 }
 
 type clashTrafficResponse struct {
@@ -53,8 +59,10 @@ type clashTrafficResponse struct {
 }
 
 type clashConnectionsResponse struct {
-	Total       int                     `json:"total"`
-	Connections []clashConnectionDetail `json:"connections"`
+	Total         int                     `json:"total"`
+	Connections   []clashConnectionDetail `json:"connections"`
+	UploadTotal   int64                   `json:"uploadTotal"`
+	DownloadTotal int64                   `json:"downloadTotal"`
 }
 
 type clashConnectionDetail struct {
@@ -78,51 +86,67 @@ func NewSingBoxStatsCollector(clashAPIAddr, secret string) *SingBoxStatsCollecto
 		client: &http.Client{
 			Timeout: 5 * time.Second,
 		},
-		totalTraffic: &TrafficData{},
-		lastTraffic:  &TrafficData{},
+		totalTraffic:    &TrafficData{},
+		lastConnTraffic: &TrafficData{},
 	}
+}
+
+func (s *SingBoxStatsCollector) doRequest(path string) ([]byte, error) {
+	url := fmt.Sprintf("%s%s", s.baseURL, path)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	if s.secret != "" {
+		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", s.secret))
+	}
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	return io.ReadAll(resp.Body)
 }
 
 func (s *SingBoxStatsCollector) GetTraffic() (*TrafficData, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	url := fmt.Sprintf("%s/traffic", s.baseURL)
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("create traffic request: %w", err)
-	}
-	if s.secret != "" {
-		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", s.secret))
-	}
-
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return s.totalTraffic, nil
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
+	body, err := s.doRequest("/connections")
 	if err != nil {
 		return s.totalTraffic, nil
 	}
 
-	var traffic clashTrafficResponse
-	if err := json.Unmarshal(body, &traffic); err != nil {
+	var connResp clashConnectionsResponse
+	if err := json.Unmarshal(body, &connResp); err != nil {
 		return s.totalTraffic, nil
 	}
 
-	deltaUp := traffic.Up - s.lastTraffic.Upload
-	deltaDown := traffic.Down - s.lastTraffic.Download
+	var currentUp, currentDown int64
+	for _, conn := range connResp.Connections {
+		currentUp += conn.Upload
+		currentDown += conn.Download
+	}
+
+	if connResp.UploadTotal > 0 {
+		currentUp = connResp.UploadTotal
+	}
+	if connResp.DownloadTotal > 0 {
+		currentDown = connResp.DownloadTotal
+	}
+
+	deltaUp := currentUp - s.lastConnTraffic.Upload
+	deltaDown := currentDown - s.lastConnTraffic.Download
 
 	if deltaUp > 0 {
 		s.totalTraffic.Upload += deltaUp
-		s.lastTraffic.Upload = traffic.Up
 	}
 	if deltaDown > 0 {
 		s.totalTraffic.Download += deltaDown
-		s.lastTraffic.Download = traffic.Down
 	}
+
+	s.lastConnTraffic.Upload = currentUp
+	s.lastConnTraffic.Download = currentDown
 
 	return &TrafficData{
 		Upload:   s.totalTraffic.Upload,
@@ -130,23 +154,25 @@ func (s *SingBoxStatsCollector) GetTraffic() (*TrafficData, error) {
 	}, nil
 }
 
+func (s *SingBoxStatsCollector) GetSpeed() (*SpeedData, error) {
+	body, err := s.doRequest("/traffic")
+	if err != nil {
+		return &SpeedData{}, nil
+	}
+
+	var traffic clashTrafficResponse
+	if err := json.Unmarshal(body, &traffic); err != nil {
+		return &SpeedData{}, nil
+	}
+
+	return &SpeedData{
+		Upload:   traffic.Up,
+		Download: traffic.Down,
+	}, nil
+}
+
 func (s *SingBoxStatsCollector) GetConnections() (*ConnectionData, error) {
-	url := fmt.Sprintf("%s/connections", s.baseURL)
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("create connections request: %w", err)
-	}
-	if s.secret != "" {
-		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", s.secret))
-	}
-
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return &ConnectionData{ActiveConnections: 0}, nil
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
+	body, err := s.doRequest("/connections")
 	if err != nil {
 		return &ConnectionData{ActiveConnections: 0}, nil
 	}
@@ -162,24 +188,9 @@ func (s *SingBoxStatsCollector) GetConnections() (*ConnectionData, error) {
 }
 
 func (s *SingBoxStatsCollector) GetOnlineUsers() ([]*OnlineUser, error) {
-	url := fmt.Sprintf("%s/connections", s.baseURL)
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("create connections request: %w", err)
-	}
-	if s.secret != "" {
-		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", s.secret))
-	}
-
-	resp, err := s.client.Do(req)
+	body, err := s.doRequest("/connections")
 	if err != nil {
 		return nil, fmt.Errorf("request clash api: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read response: %w", err)
 	}
 
 	var connResp clashConnectionsResponse
@@ -220,6 +231,11 @@ func (s *SingBoxStatsCollector) GetStats() (*StatsResult, error) {
 		traffic = &TrafficData{}
 	}
 
+	speed, err := s.GetSpeed()
+	if err != nil {
+		speed = &SpeedData{}
+	}
+
 	connections, err := s.GetConnections()
 	if err != nil {
 		connections = &ConnectionData{}
@@ -227,6 +243,7 @@ func (s *SingBoxStatsCollector) GetStats() (*StatsResult, error) {
 
 	return &StatsResult{
 		Traffic:     *traffic,
+		Speed:       *speed,
 		Connections: *connections,
 	}, nil
 }

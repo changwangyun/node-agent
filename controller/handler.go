@@ -173,6 +173,10 @@ func (h *Handler) GetStats(w http.ResponseWriter, r *http.Request) {
 			"upload":   result.Traffic.Upload,
 			"download": result.Traffic.Download,
 		},
+		"speed": map[string]interface{}{
+			"upload":   result.Speed.Upload,
+			"download": result.Speed.Download,
+		},
 		"connections": map[string]interface{}{
 			"active": result.Connections.ActiveConnections,
 		},
@@ -208,7 +212,7 @@ func (h *Handler) GetOnlineUsers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response := map[string]interface{}{
-		"count":       len(onlineUsers),
+		"count":        len(onlineUsers),
 		"online_users": onlineUsers,
 	}
 
