@@ -142,8 +142,8 @@ type StatsConfig struct {
 }
 
 type ClashAPIConfig struct {
-	Listen string `json:"listen"`
-	Secret string `json:"secret"`
+	ExternalController string `json:"external_controller"`
+	Secret             string `json:"secret,omitempty"`
 }
 
 type V2RayAPIConfig struct {
@@ -197,8 +197,8 @@ func (g *Generator) generate(req *DeployRequest) (*SingBoxConfig, error) {
 		},
 		Stats: &StatsConfig{
 			ClashAPI: &ClashAPIConfig{
-				Listen: "0.0.0.0:9090",
-				Secret: "node-agent-stats",
+				ExternalController: "0.0.0.0:9090",
+				Secret:             "node-agent-stats",
 			},
 			V2RayAPI: &V2RayAPIConfig{
 				Listen: "127.0.0.1:10001",
