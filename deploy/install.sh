@@ -253,8 +253,8 @@ create_dirs() {
   "log": { "level": "info" },
   "dns": {
     "servers": [
-      { "tag": "google", "address": "tls://8.8.8.8" },
-      { "tag": "local", "address": "223.5.5.5", "detour": "direct" }
+      { "tag": "google", "type": "tls", "server": "8.8.8.8" },
+      { "tag": "local", "type": "udp", "server": "223.5.5.5", "detour": "direct" }
     ]
   },
   "inbounds": [],

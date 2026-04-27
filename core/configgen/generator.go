@@ -26,12 +26,12 @@ type DeployRequest struct {
 }
 
 type SingBoxConfig struct {
-	Log       *LogConfig    `json:"log,omitempty"`
-	DNS       *DNSConfig    `json:"dns,omitempty"`
-	Inbounds  []Inbound     `json:"inbounds"`
-	Outbounds []Outbound    `json:"outbounds"`
-	Route     *RouteConfig  `json:"route,omitempty"`
-	Stats     *StatsConfig  `json:"experimental,omitempty"`
+	Log       *LogConfig   `json:"log,omitempty"`
+	DNS       *DNSConfig   `json:"dns,omitempty"`
+	Inbounds  []Inbound    `json:"inbounds"`
+	Outbounds []Outbound   `json:"outbounds"`
+	Route     *RouteConfig `json:"route,omitempty"`
+	Stats     *StatsConfig `json:"experimental,omitempty"`
 }
 
 type LogConfig struct {
@@ -44,29 +44,31 @@ type DNSConfig struct {
 }
 
 type DNSServer struct {
-	Tag     string `json:"tag"`
-	Address string `json:"address"`
+	Tag    string `json:"tag"`
+	Type   string `json:"type"`
+	Server string `json:"server,omitempty"`
+	Detour string `json:"detour,omitempty"`
 }
 
 type Inbound struct {
-	Type          string          `json:"type"`
-	Tag           string          `json:"tag,omitempty"`
-	Listen        string          `json:"listen,omitempty"`
-	ListenPort    int             `json:"listen_port,omitempty"`
-	InterfaceName string          `json:"interface_name,omitempty"`
-	Inet4Address  string          `json:"inet4_address,omitempty"`
-	Inet6Address  string          `json:"inet6_address,omitempty"`
-	MTU           int             `json:"mtu,omitempty"`
-	AutoRoute     bool            `json:"auto_route,omitempty"`
-	StrictRoute   bool            `json:"strict_route,omitempty"`
-	Users         []InboundUser   `json:"users,omitempty"`
-	TLS           *InboundTLS     `json:"tls,omitempty"`
+	Type          string           `json:"type"`
+	Tag           string           `json:"tag,omitempty"`
+	Listen        string           `json:"listen,omitempty"`
+	ListenPort    int              `json:"listen_port,omitempty"`
+	InterfaceName string           `json:"interface_name,omitempty"`
+	Inet4Address  string           `json:"inet4_address,omitempty"`
+	Inet6Address  string           `json:"inet6_address,omitempty"`
+	MTU           int              `json:"mtu,omitempty"`
+	AutoRoute     bool             `json:"auto_route,omitempty"`
+	StrictRoute   bool             `json:"strict_route,omitempty"`
+	Users         []InboundUser    `json:"users,omitempty"`
+	TLS           *InboundTLS      `json:"tls,omitempty"`
 	Multiplex     *MultiplexConfig `json:"multiplex,omitempty"`
 }
 
 type InboundUser struct {
-	UUID   string `json:"uuid"`
-	Flow   string `json:"flow,omitempty"`
+	UUID string `json:"uuid"`
+	Flow string `json:"flow,omitempty"`
 }
 
 type InboundTLS struct {
@@ -76,15 +78,15 @@ type InboundTLS struct {
 }
 
 type Reality struct {
-	Enabled   bool   `json:"enabled"`
-	Handshake *Handshake `json:"handshake,omitempty"`
-	PrivateKey string  `json:"private_key,omitempty"`
-	ShortID   []string `json:"short_id,omitempty"`
+	Enabled    bool       `json:"enabled"`
+	Handshake  *Handshake `json:"handshake,omitempty"`
+	PrivateKey string     `json:"private_key,omitempty"`
+	ShortID    []string   `json:"short_id,omitempty"`
 }
 
 type Handshake struct {
-	Server string `json:"server"`
-	ServerPort int `json:"server_port"`
+	Server     string `json:"server"`
+	ServerPort int    `json:"server_port"`
 }
 
 type MultiplexConfig struct {
@@ -92,16 +94,16 @@ type MultiplexConfig struct {
 }
 
 type Outbound struct {
-	Type        string          `json:"type"`
-	Tag         string          `json:"tag,omitempty"`
-	Server      string          `json:"server,omitempty"`
-	ServerPort  int             `json:"server_port,omitempty"`
-	Password    string          `json:"password,omitempty"`
-	UUID        string          `json:"uuid,omitempty"`
-	Flow        string          `json:"flow,omitempty"`
-	TLS         *OutboundTLS    `json:"tls,omitempty"`
-	Transport   *TransportConfig `json:"transport,omitempty"`
-	Multiplex   *MultiplexConfig `json:"multiplex,omitempty"`
+	Type       string           `json:"type"`
+	Tag        string           `json:"tag,omitempty"`
+	Server     string           `json:"server,omitempty"`
+	ServerPort int              `json:"server_port,omitempty"`
+	Password   string           `json:"password,omitempty"`
+	UUID       string           `json:"uuid,omitempty"`
+	Flow       string           `json:"flow,omitempty"`
+	TLS        *OutboundTLS     `json:"tls,omitempty"`
+	Transport  *TransportConfig `json:"transport,omitempty"`
+	Multiplex  *MultiplexConfig `json:"multiplex,omitempty"`
 }
 
 type OutboundTLS struct {
@@ -130,8 +132,8 @@ type RouteConfig struct {
 }
 
 type RouteRule struct {
-	Protocol  []string `json:"protocol,omitempty"`
-	Outbound  string   `json:"outbound,omitempty"`
+	Protocol []string `json:"protocol,omitempty"`
+	Outbound string   `json:"outbound,omitempty"`
 }
 
 type StatsConfig struct {
@@ -149,10 +151,10 @@ type V2RayAPIConfig struct {
 }
 
 type Generator struct {
-	mu       sync.Mutex
-	cfgPath  string
-	current  *SingBoxConfig
-	deploys  map[string]*DeployRequest
+	mu      sync.Mutex
+	cfgPath string
+	current *SingBoxConfig
+	deploys map[string]*DeployRequest
 }
 
 func NewGenerator(cfgPath string) *Generator {
@@ -189,8 +191,8 @@ func (g *Generator) generate(req *DeployRequest) (*SingBoxConfig, error) {
 		},
 		DNS: &DNSConfig{
 			Servers: []DNSServer{
-				{Tag: "google", Address: "tls://8.8.8.8"},
-				{Tag: "local", Address: "223.5.5.5"},
+				{Tag: "google", Type: "tls", Server: "8.8.8.8"},
+				{Tag: "local", Type: "udp", Server: "223.5.5.5", Detour: "direct"},
 			},
 		},
 		Stats: &StatsConfig{
