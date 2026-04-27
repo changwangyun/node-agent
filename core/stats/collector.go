@@ -60,10 +60,10 @@ type clashTrafficResponse struct {
 }
 
 type clashConnectionsResponse struct {
-	Total         int                     `json:"total"`
-	Connections   []clashConnectionDetail `json:"connections"`
-	UploadTotal   int64                   `json:"uploadTotal"`
 	DownloadTotal int64                   `json:"downloadTotal"`
+	UploadTotal   int64                   `json:"uploadTotal"`
+	Connections   []clashConnectionDetail `json:"connections"`
+	Memory        int64                   `json:"memory"`
 }
 
 type clashConnectionDetail struct {
@@ -123,18 +123,8 @@ func (s *SingBoxStatsCollector) GetTraffic() (*TrafficData, error) {
 		return s.totalTraffic, nil
 	}
 
-	var currentUp, currentDown int64
-	for _, conn := range connResp.Connections {
-		currentUp += conn.Upload
-		currentDown += conn.Download
-	}
-
-	if connResp.UploadTotal > 0 {
-		currentUp = connResp.UploadTotal
-	}
-	if connResp.DownloadTotal > 0 {
-		currentDown = connResp.DownloadTotal
-	}
+	currentUp := connResp.UploadTotal
+	currentDown := connResp.DownloadTotal
 
 	deltaUp := currentUp - s.lastConnTraffic.Upload
 	deltaDown := currentDown - s.lastConnTraffic.Download
@@ -197,7 +187,7 @@ func (s *SingBoxStatsCollector) GetConnections() (*ConnectionData, error) {
 	}
 
 	return &ConnectionData{
-		ActiveConnections: connResp.Total,
+		ActiveConnections: len(connResp.Connections),
 	}, nil
 }
 
@@ -256,17 +246,8 @@ func (s *SingBoxStatsCollector) GetStats() (*StatsResult, error) {
 		return &StatsResult{Speed: *speed}, nil
 	}
 
-	var currentUp, currentDown int64
-	for _, conn := range connResp.Connections {
-		currentUp += conn.Upload
-		currentDown += conn.Download
-	}
-	if connResp.UploadTotal > 0 {
-		currentUp = connResp.UploadTotal
-	}
-	if connResp.DownloadTotal > 0 {
-		currentDown = connResp.DownloadTotal
-	}
+	currentUp := connResp.UploadTotal
+	currentDown := connResp.DownloadTotal
 
 	deltaUp := currentUp - s.lastConnTraffic.Upload
 	deltaDown := currentDown - s.lastConnTraffic.Download
@@ -284,7 +265,7 @@ func (s *SingBoxStatsCollector) GetStats() (*StatsResult, error) {
 		Download: s.totalTraffic.Download,
 	}
 	connections := ConnectionData{
-		ActiveConnections: connResp.Total,
+		ActiveConnections: len(connResp.Connections),
 	}
 
 	s.mu.Unlock()
