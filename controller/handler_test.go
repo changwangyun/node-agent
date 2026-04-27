@@ -47,7 +47,7 @@ func setupTestHandler(t *testing.T) (*Handler, *config.Config) {
 	limiter := device.NewDeviceLimiter(&cfg.DeviceLimit)
 	reporter := heartbeat.NewReporter(cfg, mgr, multiCollector, limiter)
 
-	handler := NewHandler(mgr, generator, multiCollector, limiter, reporter)
+	handler := NewHandler(mgr, generator, multiCollector, nil, limiter, reporter)
 
 	return handler, cfg
 }

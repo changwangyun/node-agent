@@ -15,26 +15,29 @@ import (
 )
 
 type Handler struct {
-	mgr       *singbox.Manager
-	generator *configgen.Generator
-	collector stats.Collector
-	limiter   *device.DeviceLimiter
-	reporter  *heartbeat.Reporter
+	mgr        *singbox.Manager
+	generator  *configgen.Generator
+	collector  stats.Collector
+	v2rayStats *stats.V2RayStatsCollector
+	limiter    *device.DeviceLimiter
+	reporter   *heartbeat.Reporter
 }
 
 func NewHandler(
 	mgr *singbox.Manager,
 	generator *configgen.Generator,
 	collector stats.Collector,
+	v2rayStats *stats.V2RayStatsCollector,
 	limiter *device.DeviceLimiter,
 	reporter *heartbeat.Reporter,
 ) *Handler {
 	return &Handler{
-		mgr:       mgr,
-		generator: generator,
-		collector: collector,
-		limiter:   limiter,
-		reporter:  reporter,
+		mgr:        mgr,
+		generator:  generator,
+		collector:  collector,
+		v2rayStats: v2rayStats,
+		limiter:    limiter,
+		reporter:   reporter,
 	}
 }
 
@@ -271,6 +274,34 @@ func (h *Handler) GetLogs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"lines": logs,
 		"count": len(logs),
+	})
+}
+
+func (h *Handler) GetUserTraffic(w http.ResponseWriter, r *http.Request) {
+	if h.v2rayStats == nil || !h.v2rayStats.IsEnabled() {
+		writeError(w, http.StatusServiceUnavailable, "v2ray api not available: sing-box needs to be built with -tags with_v2ray_api")
+		return
+	}
+
+	userID := r.URL.Query().Get("user_id")
+	if userID != "" {
+		ut, err := h.v2rayStats.GetUserTraffic(userID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "query user traffic failed: "+err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, ut)
+		return
+	}
+
+	all, err := h.v2rayStats.GetAllUserTraffic()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "query all user traffic failed: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"users": all,
+		"count": len(all),
 	})
 }
 

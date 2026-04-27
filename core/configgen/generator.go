@@ -138,11 +138,22 @@ type RouteRule struct {
 
 type StatsConfig struct {
 	ClashAPI *ClashAPIConfig `json:"clash_api,omitempty"`
+	V2RayAPI *V2RayAPIConfig `json:"v2ray_api,omitempty"`
 }
 
 type ClashAPIConfig struct {
 	ExternalController string `json:"external_controller"`
 	Secret             string `json:"secret,omitempty"`
+}
+
+type V2RayAPIConfig struct {
+	Listen string         `json:"listen"`
+	Stats  *V2RayAPIStats `json:"stats,omitempty"`
+}
+
+type V2RayAPIStats struct {
+	Enabled   bool     `json:"enabled"`
+	Outbounds []string `json:"outbounds,omitempty"`
 }
 
 type Generator struct {
@@ -194,6 +205,13 @@ func (g *Generator) generate(req *DeployRequest) (*SingBoxConfig, error) {
 			ClashAPI: &ClashAPIConfig{
 				ExternalController: "0.0.0.0:9090",
 				Secret:             "node-agent-stats",
+			},
+			V2RayAPI: &V2RayAPIConfig{
+				Listen: "127.0.0.1:10001",
+				Stats: &V2RayAPIStats{
+					Enabled:   true,
+					Outbounds: []string{"proxy", "direct"},
+				},
 			},
 		},
 		Route: &RouteConfig{

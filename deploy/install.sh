@@ -207,39 +207,70 @@ install_binary() {
 
 install_singbox() {
     if command -v sing-box &>/dev/null; then
-        ok "sing-box 已安装: $(sing-box version 2>/dev/null | head -1 || echo '未知版本')"
-        return 0
+        if sing-box version 2>/dev/null | grep -q "with_v2ray_api"; then
+            ok "sing-box 已安装(含 v2ray_api): $(sing-box version 2>/dev/null | head -1)"
+            return 0
+        else
+            warn "当前 sing-box 不含 v2ray_api，需要重新编译以支持按用户流量统计"
+        fi
     fi
 
-    info "安装 sing-box..."
-    local pkg
-    case "$(uname -m)" in
-        x86_64|amd64)   pkg="amd64" ;;
-        aarch64|arm64)  pkg="arm64" ;;
-        armv7l|armv7)   pkg="armv7" ;;
-        *)              err "不支持的架构" ;;
-    esac
+    info "从源码编译 sing-box (含 with_v2ray_api 标签)..."
 
-    local sb_ver sb_url tmpdir
+    if ! command -v go &>/dev/null; then
+        info "安装 Go 编译环境..."
+        local go_ver
+        go_ver=$(curl -fsSL 'https://go.dev/VERSION?m=text' | head -1)
+        if [ -z "$go_ver" ]; then go_ver="go1.23.4"; fi
+        local pkg
+        case "$(uname -m)" in
+            x86_64|amd64)   pkg="amd64" ;;
+            aarch64|arm64)  pkg="arm64" ;;
+            armv7l|armv7)   pkg="armv6l" ;;
+            *)              err "不支持的架构" ;;
+        esac
+        curl -fsSL "https://go.dev/dl/${go_ver}.linux-${pkg}.tar.gz" | tar -C /usr/local -xzf -
+        export PATH=$PATH:/usr/local/go/bin
+        echo "export PATH=\$PATH:/usr/local/go/bin" >> /etc/profile.d/go.sh
+        ok "Go ${go_ver} 已安装"
+    fi
+
+    local sb_ver
     sb_ver=$(curl -fsSL https://api.github.com/repos/SagerNet/sing-box/releases/latest | grep '"tag_name"' | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
-    sb_url="https://github.com/SagerNet/sing-box/releases/download/${sb_ver}/sing-box-${sb_ver#v}-linux-${pkg}.tar.gz"
+    if [ -z "$sb_ver" ]; then sb_ver="v1.12.0"; fi
 
+    info "编译 sing-box ${sb_ver} (with_v2ray_api)..."
+    local tmpdir
     tmpdir=$(mktemp -d)
-    info "下载 sing-box ${sb_ver}..."
-    if curl -fsSL --progress-bar -o "${tmpdir}/sing-box.tar.gz" "$sb_url"; then
-        tar xzf "${tmpdir}/sing-box.tar.gz" -C "${tmpdir}"
-        local sb_bin
-        sb_bin=$(find "${tmpdir}" -name "sing-box" -type f | head -1)
-        if [ -n "$sb_bin" ]; then
-            cp "$sb_bin" "${INSTALL_DIR}/sing-box"
-            chmod +x "${INSTALL_DIR}/sing-box"
-            ok "sing-box 已安装到 ${INSTALL_DIR}/sing-box"
-        else
-            warn "sing-box 自动安装失败，请手动安装: https://sing-box.sagernet.org/installation/"
+    cd "${tmpdir}"
+
+    if ! go install -tags "with_v2ray_api" "github.com/sagernet/sing-box/cmd/sing-box@${sb_ver}"; then
+        warn "编译失败，尝试下载标准版(不含按用户流量统计)..."
+        local pkg2
+        case "$(uname -m)" in
+            x86_64|amd64)   pkg2="amd64" ;;
+            aarch64|arm64)  pkg2="arm64" ;;
+            armv7l|armv7)   pkg2="armv7" ;;
+            *)              pkg2="amd64" ;;
+        esac
+        local sb_url="https://github.com/SagerNet/sing-box/releases/download/${sb_ver}/sing-box-${sb_ver#v}-linux-${pkg2}.tar.gz"
+        if curl -fsSL --progress-bar -o "${tmpdir}/sing-box.tar.gz" "$sb_url"; then
+            tar xzf "${tmpdir}/sing-box.tar.gz" -C "${tmpdir}"
+            local sb_bin
+            sb_bin=$(find "${tmpdir}" -name "sing-box" -type f | head -1)
+            if [ -n "$sb_bin" ]; then
+                cp "$sb_bin" "${INSTALL_DIR}/sing-box"
+                chmod +x "${INSTALL_DIR}/sing-box"
+                warn "sing-box 已安装(标准版，不含按用户流量统计)"
+            fi
         fi
     else
-        warn "sing-box 下载失败，请手动安装: https://sing-box.sagernet.org/installation/"
+        cp "$(go env GOPATH)/bin/sing-box" "${INSTALL_DIR}/sing-box"
+        chmod +x "${INSTALL_DIR}/sing-box"
+        ok "sing-box ${sb_ver} 已编译安装(含 with_v2ray_api)"
     fi
+
+    cd -
     rm -rf "${tmpdir}"
 }
 

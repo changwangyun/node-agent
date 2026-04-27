@@ -41,10 +41,12 @@ func main() {
 	fallbackCollector := stats.NewFallbackCollector()
 	multiCollector := stats.NewMultiCollector(singboxCollector, fallbackCollector)
 
+	v2rayStatsCollector := stats.NewV2RayStatsCollector("127.0.0.1:10001")
+
 	limiter := device.NewDeviceLimiter(&cfg.DeviceLimit)
 	reporter := heartbeat.NewReporter(cfg, mgr, multiCollector, limiter)
 
-	handler := controller.NewHandler(mgr, generator, multiCollector, limiter, reporter)
+	handler := controller.NewHandler(mgr, generator, multiCollector, v2rayStatsCollector, limiter, reporter)
 
 	mux := http.NewServeMux()
 
@@ -61,6 +63,7 @@ func main() {
 	mux.HandleFunc("/session/acquire", withMethods(handler.AcquireSession, http.MethodPost))
 	mux.HandleFunc("/session/release", withMethods(handler.ReleaseSession, http.MethodPost))
 	mux.HandleFunc("/logs", withMethods(handler.GetLogs, http.MethodGet))
+	mux.HandleFunc("/traffic/user", withMethods(handler.GetUserTraffic, http.MethodGet))
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
