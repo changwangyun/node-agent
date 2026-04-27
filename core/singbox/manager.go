@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"sync"
-	"syscall"
 	"time"
 
 	"node-agent/config"
@@ -86,9 +85,7 @@ func (m *Manager) Start() error {
 	cmd.Dir = m.cfg.SingBox.WorkDir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setpgid: true,
-	}
+	setSysProcAttr(cmd)
 
 	m.mu.Lock()
 	m.cmd = cmd
@@ -145,7 +142,7 @@ func (m *Manager) Stop() error {
 	}
 
 	if m.cmd != nil && m.cmd.Process != nil {
-		_ = syscall.Kill(-m.cmd.Process.Pid, syscall.SIGTERM)
+		_ = sendSigterm(m.cmd.Process.Pid)
 
 		done := make(chan error, 1)
 		go func() {
@@ -156,7 +153,7 @@ func (m *Manager) Stop() error {
 		select {
 		case <-done:
 		case <-time.After(10 * time.Second):
-			_ = syscall.Kill(-m.cmd.Process.Pid, syscall.SIGKILL)
+			_ = sendSigkill(m.cmd.Process.Pid)
 		}
 	}
 
