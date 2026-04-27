@@ -36,12 +36,14 @@ func main() {
 
 	mgr := singbox.NewManager(cfg)
 	generator := configgen.NewGenerator(cfg.SingBox.ConfigPath)
+	generator.SetClashAPI(cfg.SingBox.ClashAPIAddr, cfg.SingBox.ClashAPISecret)
+	generator.SetV2RayAPI(cfg.SingBox.V2RayAPIAddr)
 
-	singboxCollector := stats.NewSingBoxStatsCollector("0.0.0.0:9090", "node-agent-stats")
+	singboxCollector := stats.NewSingBoxStatsCollector(cfg.SingBox.ClashAPIAddr, cfg.SingBox.ClashAPISecret)
 	fallbackCollector := stats.NewFallbackCollector()
 	multiCollector := stats.NewMultiCollector(singboxCollector, fallbackCollector)
 
-	v2rayStatsCollector := stats.NewV2RayStatsCollector("127.0.0.1:10001")
+	v2rayStatsCollector := stats.NewV2RayStatsCollector(cfg.SingBox.V2RayAPIAddr)
 
 	limiter := device.NewDeviceLimiter(&cfg.DeviceLimit)
 	reporter := heartbeat.NewReporter(cfg, mgr, multiCollector, limiter)

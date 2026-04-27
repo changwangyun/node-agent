@@ -33,9 +33,12 @@ type Config struct {
 }
 
 type SingBoxConfig struct {
-	BinaryPath string `json:"binary_path"`
-	ConfigPath string `json:"config_path"`
-	WorkDir    string `json:"work_dir"`
+	BinaryPath     string `json:"binary_path"`
+	ConfigPath     string `json:"config_path"`
+	WorkDir        string `json:"work_dir"`
+	ClashAPIAddr   string `json:"clash_api_addr"`
+	ClashAPISecret string `json:"clash_api_secret"`
+	V2RayAPIAddr   string `json:"v2ray_api_addr"`
 }
 
 type ControlPlaneConfig struct {
@@ -67,9 +70,12 @@ func DefaultConfig() *Config {
 		LogLevel: "info",
 		DataDir:  "/var/lib/node-agent",
 		SingBox: SingBoxConfig{
-			BinaryPath: "/usr/local/bin/sing-box",
-			ConfigPath: "/etc/sing-box/config.json",
-			WorkDir:    "/etc/sing-box",
+			BinaryPath:     "/usr/local/bin/sing-box",
+			ConfigPath:     "/etc/sing-box/config.json",
+			WorkDir:        "/etc/sing-box",
+			ClashAPIAddr:   "127.0.0.1:9090",
+			ClashAPISecret: "node-agent-stats",
+			V2RayAPIAddr:   "127.0.0.1:10001",
 		},
 		ControlPlane: ControlPlaneConfig{
 			URL:     "http://127.0.0.1:8000",

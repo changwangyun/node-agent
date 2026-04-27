@@ -202,17 +202,32 @@ type V2RayAPIStats struct {
 }
 
 type Generator struct {
-	mu      sync.Mutex
-	cfgPath string
-	current *SingBoxConfig
-	deploys map[string]*DeployRequest
+	mu             sync.Mutex
+	cfgPath        string
+	current        *SingBoxConfig
+	deploys        map[string]*DeployRequest
+	clashAPIAddr   string
+	clashAPISecret string
+	v2rayAPIAddr   string
 }
 
 func NewGenerator(cfgPath string) *Generator {
 	return &Generator{
-		cfgPath: cfgPath,
-		deploys: make(map[string]*DeployRequest),
+		cfgPath:        cfgPath,
+		deploys:        make(map[string]*DeployRequest),
+		clashAPIAddr:   "0.0.0.0:9090",
+		clashAPISecret: "node-agent-stats",
+		v2rayAPIAddr:   "127.0.0.1:10001",
 	}
+}
+
+func (g *Generator) SetClashAPI(addr, secret string) {
+	g.clashAPIAddr = addr
+	g.clashAPISecret = secret
+}
+
+func (g *Generator) SetV2RayAPI(addr string) {
+	g.v2rayAPIAddr = addr
 }
 
 func (g *Generator) GenerateAndWrite(req *DeployRequest) (*ClientConfigResult, error) {
@@ -285,11 +300,11 @@ func (g *Generator) generate(req *DeployRequest) (*SingBoxConfig, *ClientConfigR
 		},
 		Stats: &StatsConfig{
 			ClashAPI: &ClashAPIConfig{
-				ExternalController: "0.0.0.0:9090",
-				Secret:             "node-agent-stats",
+				ExternalController: g.clashAPIAddr,
+				Secret:             g.clashAPISecret,
 			},
 			V2RayAPI: &V2RayAPIConfig{
-				Listen: "127.0.0.1:10001",
+				Listen: g.v2rayAPIAddr,
 				Stats: &V2RayAPIStats{
 					Enabled:   true,
 					Outbounds: []string{"direct"},
