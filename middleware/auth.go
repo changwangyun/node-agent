@@ -17,6 +17,11 @@ import (
 func TokenAuth(cfg *config.Config) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/health" {
+				next.ServeHTTP(w, r)
+				return
+			}
+
 			token := r.Header.Get("X-Node-Token")
 			if token == "" {
 				token = r.URL.Query().Get("token")
@@ -26,6 +31,45 @@ func TokenAuth(cfg *config.Config) func(http.Handler) http.Handler {
 				writeJSON(w, http.StatusUnauthorized, map[string]interface{}{
 					"error": "unauthorized: invalid token",
 				})
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+func CORS(cfg *config.Config) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !cfg.CORS.Enabled {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			origin := r.Header.Get("Origin")
+			allowed := false
+
+			if len(cfg.CORS.AllowedOrigins) == 0 {
+				allowed = true
+			} else {
+				for _, o := range cfg.CORS.AllowedOrigins {
+					if o == "*" || o == origin {
+						allowed = true
+						break
+					}
+				}
+			}
+
+			if allowed && origin != "" {
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+				w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Node-Token, X-Signature, X-Timestamp")
+				w.Header().Set("Access-Control-Max-Age", "86400")
+			}
+
+			if r.Method == http.MethodOptions {
+				w.WriteHeader(http.StatusNoContent)
 				return
 			}
 

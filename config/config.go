@@ -25,6 +25,8 @@ type Config struct {
 
 	IPWhitelist []string `json:"ip_whitelist"`
 
+	CORS CORSConfig `json:"cors"`
+
 	HeartbeatInterval int `json:"heartbeat_interval"`
 
 	WatchdogInterval int `json:"watchdog_interval"`
@@ -46,6 +48,11 @@ type ControlPlaneConfig struct {
 type DeviceLimitConfig struct {
 	MaxDevices    int `json:"max_devices"`
 	MaxConcurrent int `json:"max_concurrent"`
+}
+
+type CORSConfig struct {
+	Enabled        bool     `json:"enabled"`
+	AllowedOrigins []string `json:"allowed_origins"`
 }
 
 var (
@@ -74,7 +81,11 @@ func DefaultConfig() *Config {
 			MaxDevices:    3,
 			MaxConcurrent: 5,
 		},
-		IPWhitelist:       []string{},
+		IPWhitelist: []string{},
+		CORS: CORSConfig{
+			Enabled:        true,
+			AllowedOrigins: []string{"*"},
+		},
 		HeartbeatInterval: 10,
 		WatchdogInterval:  5,
 	}

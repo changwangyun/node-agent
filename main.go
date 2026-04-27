@@ -69,6 +69,7 @@ func main() {
 	var h http.Handler = mux
 	h = middleware.TokenAuth(cfg)(h)
 	h = middleware.IPWhitelist(cfg)(h)
+	h = middleware.CORS(cfg)(h)
 	h = middleware.Logging(h)
 	h = middleware.Recovery(h)
 
