@@ -168,7 +168,7 @@ func (h *Handler) GetStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	response := map[string]interface{}{
 		"traffic": map[string]interface{}{
 			"upload":   result.Traffic.Upload,
 			"download": result.Traffic.Download,
@@ -176,7 +176,43 @@ func (h *Handler) GetStats(w http.ResponseWriter, r *http.Request) {
 		"connections": map[string]interface{}{
 			"active": result.Connections.ActiveConnections,
 		},
-	})
+	}
+
+	if sc, ok := h.collector.(*stats.SingBoxStatsCollector); ok {
+		if onlineUsers, err := sc.GetOnlineUsers(); err == nil {
+			response["online_users"] = len(onlineUsers)
+			response["online_details"] = onlineUsers
+		}
+	}
+
+	if h.v2rayStats != nil && h.v2rayStats.IsEnabled() {
+		if allTraffic, err := h.v2rayStats.GetAllUserTraffic(); err == nil {
+			response["user_traffic"] = allTraffic
+		}
+	}
+
+	writeJSON(w, http.StatusOK, response)
+}
+
+func (h *Handler) GetOnlineUsers(w http.ResponseWriter, r *http.Request) {
+	sc, ok := h.collector.(*stats.SingBoxStatsCollector)
+	if !ok {
+		writeError(w, http.StatusServiceUnavailable, "clash api not available")
+		return
+	}
+
+	onlineUsers, err := sc.GetOnlineUsers()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "get online users failed: "+err.Error())
+		return
+	}
+
+	response := map[string]interface{}{
+		"count":       len(onlineUsers),
+		"online_users": onlineUsers,
+	}
+
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (h *Handler) Heartbeat(w http.ResponseWriter, r *http.Request) {

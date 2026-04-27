@@ -65,6 +65,7 @@ func main() {
 	mux.HandleFunc("/logs", withMethods(handler.GetLogs, http.MethodGet))
 	mux.HandleFunc("/traffic/user", withMethods(handler.GetUserTraffic, http.MethodGet))
 	mux.HandleFunc("/client-config", withMethods(handler.ClientConfig, http.MethodGet))
+	mux.HandleFunc("/online", withMethods(handler.GetOnlineUsers, http.MethodGet))
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

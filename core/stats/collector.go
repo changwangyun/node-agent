@@ -18,6 +18,14 @@ type ConnectionData struct {
 	ActiveConnections int `json:"active_connections"`
 }
 
+type OnlineUser struct {
+	UserID   string `json:"user_id"`
+	Inbound  string `json:"inbound"`
+	IP       string `json:"ip"`
+	Upload   int64  `json:"upload"`
+	Download int64  `json:"download"`
+}
+
 type StatsResult struct {
 	Traffic     TrafficData    `json:"traffic"`
 	Connections ConnectionData `json:"connections"`
@@ -30,12 +38,12 @@ type Collector interface {
 }
 
 type SingBoxStatsCollector struct {
-	mu       sync.RWMutex
-	baseURL  string
-	secret   string
-	client   *http.Client
+	mu      sync.RWMutex
+	baseURL string
+	secret  string
+	client  *http.Client
 
-	lastTraffic *TrafficData
+	lastTraffic  *TrafficData
 	totalTraffic *TrafficData
 }
 
@@ -45,7 +53,22 @@ type clashTrafficResponse struct {
 }
 
 type clashConnectionsResponse struct {
-	Total int `json:"total"`
+	Total       int                     `json:"total"`
+	Connections []clashConnectionDetail `json:"connections"`
+}
+
+type clashConnectionDetail struct {
+	ID       string `json:"id"`
+	Metadata struct {
+		Network     string `json:"network"`
+		Type        string `json:"type"`
+		SourceIP    string `json:"sourceIP"`
+		Host        string `json:"host"`
+		Inbound     string `json:"inbound"`
+		InboundUser string `json:"inboundUser"`
+	} `json:"metadata"`
+	Upload   int64 `json:"upload"`
+	Download int64 `json:"download"`
 }
 
 func NewSingBoxStatsCollector(clashAPIAddr, secret string) *SingBoxStatsCollector {
@@ -138,6 +161,59 @@ func (s *SingBoxStatsCollector) GetConnections() (*ConnectionData, error) {
 	}, nil
 }
 
+func (s *SingBoxStatsCollector) GetOnlineUsers() ([]*OnlineUser, error) {
+	url := fmt.Sprintf("%s/connections", s.baseURL)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create connections request: %w", err)
+	}
+	if s.secret != "" {
+		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", s.secret))
+	}
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request clash api: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	var connResp clashConnectionsResponse
+	if err := json.Unmarshal(body, &connResp); err != nil {
+		return nil, fmt.Errorf("parse response: %w", err)
+	}
+
+	userMap := make(map[string]*OnlineUser)
+	for _, conn := range connResp.Connections {
+		userID := conn.Metadata.InboundUser
+		if userID == "" {
+			continue
+		}
+		if existing, ok := userMap[userID]; ok {
+			existing.Upload += conn.Upload
+			existing.Download += conn.Download
+		} else {
+			userMap[userID] = &OnlineUser{
+				UserID:   userID,
+				Inbound:  conn.Metadata.Inbound,
+				IP:       conn.Metadata.SourceIP,
+				Upload:   conn.Upload,
+				Download: conn.Download,
+			}
+		}
+	}
+
+	result := make([]*OnlineUser, 0, len(userMap))
+	for _, u := range userMap {
+		result = append(result, u)
+	}
+	return result, nil
+}
+
 func (s *SingBoxStatsCollector) GetStats() (*StatsResult, error) {
 	traffic, err := s.GetTraffic()
 	if err != nil {
@@ -156,10 +232,10 @@ func (s *SingBoxStatsCollector) GetStats() (*StatsResult, error) {
 }
 
 type FallbackCollector struct {
-	mu           sync.RWMutex
-	uploadBytes  int64
+	mu            sync.RWMutex
+	uploadBytes   int64
 	downloadBytes int64
-	connections  int
+	connections   int
 }
 
 func NewFallbackCollector() *FallbackCollector {
@@ -211,8 +287,8 @@ func (f *FallbackCollector) SetConnections(count int) {
 }
 
 type MultiCollector struct {
-	primary   Collector
-	fallback  Collector
+	primary  Collector
+	fallback Collector
 }
 
 func NewMultiCollector(primary, fallback Collector) *MultiCollector {

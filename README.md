@@ -1161,12 +1161,51 @@ GET /client-config?user_id=123
 
 | 接口 | 粒度 | 数据来源 | 用途 |
 |------|------|----------|------|
-| `GET /stats` | 节点级（全局总量） | Clash API | 监控节点整体负载 |
+| `GET /stats` | 节点级（全局总量）+ 在线用户 | Clash API | 监控节点整体负载、在线用户 |
 | `GET /traffic/user` | 用户级（按用户统计） | V2Ray API | 计费、用户流量配额管理 |
+| `GET /online` | 在线用户详情 | Clash API | 实时在线用户列表、IP追踪 |
 
 ---
 
-### 5.7 心跳数据接口
+### 5.7 在线用户接口
+
+#### `GET /online`
+
+查询当前在线的 VPN 用户列表，包含用户 ID、入站标签、来源 IP 和实时流量。
+
+**前提条件**：sing-box 必须使用 `-tags with_v2ray_api,with_quic,with_clash_api` 编译，且配置中用户必须包含 `name` 字段。
+
+**响应** (`200 OK`)：
+
+```json
+{
+  "count": 2,
+  "online_users": [
+    {
+      "user_id": "user-001",
+      "inbound": "hysteria2-in",
+      "ip": "203.0.113.50",
+      "upload": 1048576,
+      "download": 5242880
+    },
+    {
+      "user_id": "user-002",
+      "inbound": "vless-in",
+      "ip": "198.51.100.25",
+      "upload": 204800,
+      "download": 1024000
+    }
+  ]
+}
+```
+
+**工作原理**：通过 Clash API 的 `/connections` 接口获取所有活跃连接，解析每个连接的 `inboundUser` 字段（即部署时设置的 `name`），按用户聚合后返回。
+
+> **注意**：`/stats` 接口现在也会返回 `online_users`（在线用户数）、`online_details`（在线用户详情）和 `user_traffic`（V2Ray 按用户流量统计）字段。
+
+---
+
+### 5.8 心跳数据接口
 
 #### `GET /heartbeat`
 
@@ -2325,6 +2364,21 @@ public function deployToNode($node, $user, $protocol)
 ---
 
 ## 13. 版本变更记录
+
+### v1.7.0 (2026-04-28)
+
+**新功能**：
+
+- 在线用户自动检测：通过 Clash API `/connections` 接口实时获取在线用户列表
+- 新增 `GET /online` 接口：返回在线用户 ID、入站标签、来源 IP、实时流量
+- `/stats` 接口增强：新增 `online_users`（在线用户数）、`online_details`（在线用户详情）、`user_traffic`（V2Ray 按用户流量）
+- sing-box 用户配置添加 `name` 字段：将 `user_id` 写入用户名，使 V2Ray API 和 Clash API 能按用户识别流量
+
+**修复**：
+
+- sing-box 编译标签补全：完整标签为 `with_v2ray_api,with_quic,with_clash_api`
+- 修复 Hysteria2 协议因缺少 `with_quic` 标签无法启动的问题
+- 修复 Clash API 因缺少 `with_clash_api` 标签无法启动的问题
 
 ### v1.6.0 (2026-04-28)
 

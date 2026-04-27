@@ -95,6 +95,7 @@ type Inbound struct {
 }
 
 type InboundUser struct {
+	Name     string `json:"name,omitempty"`
 	UUID     string `json:"uuid,omitempty"`
 	Password string `json:"password,omitempty"`
 	Flow     string `json:"flow,omitempty"`
@@ -358,7 +359,7 @@ func (g *Generator) generateHysteria2Inbound(req *DeployRequest, certPath, keyPa
 		Listen:     "0.0.0.0",
 		ListenPort: req.Port,
 		Users: []InboundUser{
-			{Password: req.Password},
+			{Name: req.UserID, Password: req.Password},
 		},
 		TLS: &InboundTLS{
 			Enabled:    true,
@@ -408,7 +409,7 @@ func (g *Generator) generateVLESSInbound(req *DeployRequest, certPath, keyPath s
 		Listen:     "0.0.0.0",
 		ListenPort: req.Port,
 		Users: []InboundUser{
-			{UUID: uuid, Flow: "xtls-rprx-vision"},
+			{Name: req.UserID, UUID: uuid, Flow: "xtls-rprx-vision"},
 		},
 		TLS: &InboundTLS{
 			Enabled:    true,
@@ -465,7 +466,7 @@ func (g *Generator) generateRealityInbound(req *DeployRequest) (*Inbound, error)
 		Listen:     "0.0.0.0",
 		ListenPort: req.Port,
 		Users: []InboundUser{
-			{UUID: uuid, Flow: "xtls-rprx-vision"},
+			{Name: req.UserID, UUID: uuid, Flow: "xtls-rprx-vision"},
 		},
 		TLS: &InboundTLS{
 			Enabled:    true,
