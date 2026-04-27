@@ -254,7 +254,7 @@ create_dirs() {
   "dns": {
     "servers": [
       { "tag": "google", "type": "tls", "server": "8.8.8.8" },
-      { "tag": "local", "type": "udp", "server": "223.5.5.5", "detour": "direct" }
+      { "tag": "local", "type": "udp", "server": "223.5.5.5" }
     ]
   },
   "inbounds": [],

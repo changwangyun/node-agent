@@ -193,7 +193,7 @@ func (g *Generator) generate(req *DeployRequest) (*SingBoxConfig, error) {
 		DNS: &DNSConfig{
 			Servers: []DNSServer{
 				{Tag: "google", Type: "tls", Server: "8.8.8.8"},
-				{Tag: "local", Type: "udp", Server: "223.5.5.5", Detour: "direct"},
+				{Tag: "local", Type: "udp", Server: "223.5.5.5"},
 			},
 		},
 		Stats: &StatsConfig{
