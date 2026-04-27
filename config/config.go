@@ -1,0 +1,160 @@
+package config
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sync"
+)
+
+type Config struct {
+	mu sync.RWMutex
+
+	NodeID   string `json:"node_id"`
+	APIPort  int    `json:"api_port"`
+	APIToken string `json:"api_token"`
+	LogLevel string `json:"log_level"`
+	DataDir  string `json:"data_dir"`
+
+	SingBox SingBoxConfig `json:"singbox"`
+
+	ControlPlane ControlPlaneConfig `json:"control_plane"`
+
+	DeviceLimit DeviceLimitConfig `json:"device_limit"`
+
+	IPWhitelist []string `json:"ip_whitelist"`
+
+	HeartbeatInterval int `json:"heartbeat_interval"`
+
+	WatchdogInterval int `json:"watchdog_interval"`
+}
+
+type SingBoxConfig struct {
+	BinaryPath string `json:"binary_path"`
+	ConfigPath string `json:"config_path"`
+	WorkDir    string `json:"work_dir"`
+}
+
+type ControlPlaneConfig struct {
+	URL     string `json:"url"`
+	Token   string `json:"token"`
+	NodeID  string `json:"node_id"`
+	Timeout int    `json:"timeout"`
+}
+
+type DeviceLimitConfig struct {
+	MaxDevices    int `json:"max_devices"`
+	MaxConcurrent int `json:"max_concurrent"`
+}
+
+var (
+	globalCfg *Config
+)
+
+func DefaultConfig() *Config {
+	return &Config{
+		NodeID:   "node-001",
+		APIPort:  8080,
+		APIToken: "change-me-in-production",
+		LogLevel: "info",
+		DataDir:  "/var/lib/node-agent",
+		SingBox: SingBoxConfig{
+			BinaryPath: "/usr/local/bin/sing-box",
+			ConfigPath: "/etc/sing-box/config.json",
+			WorkDir:    "/etc/sing-box",
+		},
+		ControlPlane: ControlPlaneConfig{
+			URL:     "http://127.0.0.1:8000",
+			Token:   "",
+			NodeID:  "node-001",
+			Timeout: 10,
+		},
+		DeviceLimit: DeviceLimitConfig{
+			MaxDevices:    3,
+			MaxConcurrent: 5,
+		},
+		IPWhitelist:       []string{},
+		HeartbeatInterval: 10,
+		WatchdogInterval:  5,
+	}
+}
+
+func Load(path string) (*Config, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			cfg := DefaultConfig()
+			if writeErr := cfg.Save(path); writeErr != nil {
+				return nil, fmt.Errorf("create default config: %w", writeErr)
+			}
+			globalCfg = cfg
+			return cfg, nil
+		}
+		return nil, fmt.Errorf("read config file: %w", err)
+	}
+
+	cfg := DefaultConfig()
+	if err := json.Unmarshal(data, cfg); err != nil {
+		return nil, fmt.Errorf("parse config file: %w", err)
+	}
+
+	globalCfg = cfg
+	return cfg, nil
+}
+
+func Get() *Config {
+	if globalCfg == nil {
+		globalCfg = DefaultConfig()
+	}
+	return globalCfg
+}
+
+func Set(cfg *Config) {
+	globalCfg = cfg
+}
+
+func (c *Config) Save(path string) error {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	data, err := json.MarshalIndent(c, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal config: %w", err)
+	}
+
+	dir := filepath.Dir(path)
+	if dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return fmt.Errorf("create config dir: %w", err)
+		}
+	}
+
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return fmt.Errorf("write config file: %w", err)
+	}
+	return nil
+}
+
+func (c *Config) GetAPIAddr() string {
+	return fmt.Sprintf(":%d", c.APIPort)
+}
+
+func (c *Config) GetControlPlaneURL() string {
+	return c.ControlPlane.URL
+}
+
+func (c *Config) IsIPWhitelisted(ip string) bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if len(c.IPWhitelist) == 0 {
+		return true
+	}
+	for _, allowed := range c.IPWhitelist {
+		if allowed == ip || allowed == "0.0.0.0/0" {
+			return true
+		}
+	}
+	return false
+}

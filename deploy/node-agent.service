@@ -1,0 +1,36 @@
+[Unit]
+Description=Node Agent - VPN Node Control Daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+ExecStart=/usr/local/bin/node-agent -config /etc/node-agent/config.json
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65535
+
+WorkingDirectory=/var/lib/node-agent
+
+Environment=HOME=/var/lib/node-agent
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=node-agent
+
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=no
+
+ReadWritePaths=/etc/node-agent
+ReadWritePaths=/etc/sing-box
+ReadWritePaths=/var/lib/node-agent
+ReadWritePaths=/var/log/node-agent
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,261 @@
+package controller
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+
+	"node-agent/core/configgen"
+	"node-agent/core/device"
+	"node-agent/core/heartbeat"
+	"node-agent/core/singbox"
+	"node-agent/core/stats"
+	"node-agent/utils"
+)
+
+type Handler struct {
+	mgr       *singbox.Manager
+	generator *configgen.Generator
+	collector stats.Collector
+	limiter   *device.DeviceLimiter
+	reporter  *heartbeat.Reporter
+}
+
+func NewHandler(
+	mgr *singbox.Manager,
+	generator *configgen.Generator,
+	collector stats.Collector,
+	limiter *device.DeviceLimiter,
+	reporter *heartbeat.Reporter,
+) *Handler {
+	return &Handler{
+		mgr:       mgr,
+		generator: generator,
+		collector: collector,
+		limiter:   limiter,
+		reporter:  reporter,
+	}
+}
+
+func (h *Handler) Deploy(w http.ResponseWriter, r *http.Request) {
+	var req configgen.DeployRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
+		return
+	}
+
+	if req.UserID == "" || req.NodeID == "" || req.Protocol == "" {
+		writeError(w, http.StatusBadRequest, "missing required fields: user_id, node_id, protocol")
+		return
+	}
+
+	if req.Server == "" || req.Port == 0 {
+		writeError(w, http.StatusBadRequest, "missing required fields: server, port")
+		return
+	}
+
+	if err := h.generator.GenerateAndWrite(&req); err != nil {
+		writeError(w, http.StatusInternalServerError, "generate config failed: "+err.Error())
+		return
+	}
+
+	if h.mgr.IsRunning() {
+		if err := h.mgr.Restart(); err != nil {
+			writeError(w, http.StatusInternalServerError, "restart sing-box failed: "+err.Error())
+			return
+		}
+	} else {
+		if err := h.mgr.Start(); err != nil {
+			writeError(w, http.StatusInternalServerError, "start sing-box failed: "+err.Error())
+			return
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"message": fmt.Sprintf("deployed %s config for user %s", req.Protocol, req.UserID),
+		"node_id": req.NodeID,
+	})
+}
+
+func (h *Handler) Status(w http.ResponseWriter, r *http.Request) {
+	isRunning := h.mgr.IsRunning()
+	state := h.mgr.GetState()
+	uptime := h.mgr.GetUptime()
+	pid := h.mgr.GetPID()
+
+	cpuPercent, _ := utils.GetCPUUsage()
+	memPercent, memUsed, memTotal := utils.GetMemoryUsage()
+	diskUsed, diskTotal := utils.GetDiskUsage()
+	load1, load5, load15 := utils.GetLoadAvg()
+
+	var activeConns int
+	connData, err := h.collector.GetConnections()
+	if err == nil && connData != nil {
+		activeConns = connData.ActiveConnections
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"node": map[string]interface{}{
+			"singbox_running": isRunning,
+			"singbox_state":   state.String(),
+			"uptime_seconds":  int64(uptime.Seconds()),
+			"pid":             pid,
+		},
+		"system": map[string]interface{}{
+			"cpu_percent": cpuPercent,
+			"mem_percent": memPercent,
+			"mem_used_mb": memUsed,
+			"mem_total_mb": memTotal,
+			"disk_used_gb": diskUsed,
+			"disk_total_gb": diskTotal,
+			"load_1":       load1,
+			"load_5":       load5,
+			"load_15":      load15,
+		},
+		"connections": map[string]interface{}{
+			"active": activeConns,
+		},
+		"devices": map[string]interface{}{
+			"online_users": h.limiter.GetOnlineUserCount(),
+			"total_devices": h.limiter.GetTotalDeviceCount(),
+		},
+	})
+}
+
+func (h *Handler) GetStats(w http.ResponseWriter, r *http.Request) {
+	result, err := h.collector.GetStats()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "get stats failed: "+err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"traffic": map[string]interface{}{
+			"upload":   result.Traffic.Upload,
+			"download": result.Traffic.Download,
+		},
+		"connections": map[string]interface{}{
+			"active": result.Connections.ActiveConnections,
+		},
+	})
+}
+
+func (h *Handler) Heartbeat(w http.ResponseWriter, r *http.Request) {
+	payload := h.reporter.GetPayload()
+	writeJSON(w, http.StatusOK, payload)
+}
+
+func (h *Handler) Restart(w http.ResponseWriter, r *http.Request) {
+	if err := h.mgr.Restart(); err != nil {
+		writeError(w, http.StatusInternalServerError, "restart failed: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"message": "sing-box restarted",
+	})
+}
+
+func (h *Handler) Stop(w http.ResponseWriter, r *http.Request) {
+	if err := h.mgr.Stop(); err != nil {
+		writeError(w, http.StatusInternalServerError, "stop failed: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"message": "sing-box stopped",
+	})
+}
+
+func (h *Handler) Start(w http.ResponseWriter, r *http.Request) {
+	if err := h.mgr.Start(); err != nil {
+		writeError(w, http.StatusInternalServerError, "start failed: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"message": "sing-box started",
+	})
+}
+
+func (h *Handler) RegisterDevice(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		UserID   string `json:"user_id"`
+		DeviceID string `json:"device_id"`
+		IP       string `json:"ip"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	result, err := h.limiter.RegisterDevice(req.UserID, req.DeviceID, req.IP)
+	if err != nil {
+		writeJSON(w, http.StatusForbidden, map[string]interface{}{
+			"allowed": false,
+			"reason":  result.String(),
+			"error":   err.Error(),
+		})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"allowed":       true,
+		"reason":        result.String(),
+		"device_count":  h.limiter.GetDeviceCount(req.UserID),
+	})
+}
+
+func (h *Handler) AcquireSession(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		UserID string `json:"user_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	result, err := h.limiter.AcquireSession(req.UserID)
+	if err != nil {
+		writeJSON(w, http.StatusForbidden, map[string]interface{}{
+			"allowed": false,
+			"reason":  result.String(),
+			"error":   err.Error(),
+		})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"allowed":           true,
+		"reason":            result.String(),
+		"concurrent_count":  h.limiter.GetConcurrentCount(req.UserID),
+	})
+}
+
+func (h *Handler) ReleaseSession(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		UserID string `json:"user_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	h.limiter.ReleaseSession(req.UserID)
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+	})
+}
+
+func writeJSON(w http.ResponseWriter, status int, data interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(data)
+}
+
+func writeError(w http.ResponseWriter, status int, msg string) {
+	writeJSON(w, status, map[string]interface{}{
+		"error": msg,
+	})
+}
