@@ -134,6 +134,7 @@ type RouteConfig struct {
 
 type RouteRule struct {
 	Protocol []string `json:"protocol,omitempty"`
+	Action   string   `json:"action,omitempty"`
 	Outbound string   `json:"outbound,omitempty"`
 }
 
@@ -209,7 +210,7 @@ func (g *Generator) generate(req *DeployRequest) (*SingBoxConfig, error) {
 			Rules: []RouteRule{
 				{
 					Protocol: []string{"dns"},
-					Outbound: "dns-out",
+					Action:   "sniff",
 				},
 			},
 			DefaultDomainResolver: "google",
@@ -251,11 +252,6 @@ func (g *Generator) generate(req *DeployRequest) (*SingBoxConfig, error) {
 	cfg.Outbounds = append(cfg.Outbounds, Outbound{
 		Type: "direct",
 		Tag:  "direct",
-	})
-
-	cfg.Outbounds = append(cfg.Outbounds, Outbound{
-		Type: "dns",
-		Tag:  "dns-out",
 	})
 
 	cfg.Outbounds = append(cfg.Outbounds, Outbound{
