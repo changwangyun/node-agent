@@ -1,0 +1,7 @@
+node-agent
+node-agent-*
+dist/
+*.tar.gz
+*.exe
+test.php
+.DS_Store
