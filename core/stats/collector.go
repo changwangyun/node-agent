@@ -240,25 +240,61 @@ func (s *SingBoxStatsCollector) GetOnlineUsers() ([]*OnlineUser, error) {
 }
 
 func (s *SingBoxStatsCollector) GetStats() (*StatsResult, error) {
-	traffic, err := s.GetTraffic()
+	s.mu.Lock()
+
+	body, err := s.doRequest("/connections")
 	if err != nil {
-		traffic = &TrafficData{}
+		s.mu.Unlock()
+		speed, _ := s.GetSpeed()
+		return &StatsResult{Speed: *speed}, nil
 	}
 
-	speed, err := s.GetSpeed()
-	if err != nil {
-		speed = &SpeedData{}
+	var connResp clashConnectionsResponse
+	if err := json.Unmarshal(body, &connResp); err != nil {
+		s.mu.Unlock()
+		speed, _ := s.GetSpeed()
+		return &StatsResult{Speed: *speed}, nil
 	}
 
-	connections, err := s.GetConnections()
-	if err != nil {
-		connections = &ConnectionData{}
+	var currentUp, currentDown int64
+	for _, conn := range connResp.Connections {
+		currentUp += conn.Upload
+		currentDown += conn.Download
 	}
+	if connResp.UploadTotal > 0 {
+		currentUp = connResp.UploadTotal
+	}
+	if connResp.DownloadTotal > 0 {
+		currentDown = connResp.DownloadTotal
+	}
+
+	deltaUp := currentUp - s.lastConnTraffic.Upload
+	deltaDown := currentDown - s.lastConnTraffic.Download
+	if deltaUp > 0 {
+		s.totalTraffic.Upload += deltaUp
+	}
+	if deltaDown > 0 {
+		s.totalTraffic.Download += deltaDown
+	}
+	s.lastConnTraffic.Upload = currentUp
+	s.lastConnTraffic.Download = currentDown
+
+	traffic := TrafficData{
+		Upload:   s.totalTraffic.Upload,
+		Download: s.totalTraffic.Download,
+	}
+	connections := ConnectionData{
+		ActiveConnections: connResp.Total,
+	}
+
+	s.mu.Unlock()
+
+	speed, _ := s.GetSpeed()
 
 	return &StatsResult{
-		Traffic:     *traffic,
+		Traffic:     traffic,
 		Speed:       *speed,
-		Connections: *connections,
+		Connections: connections,
 	}, nil
 }
 

@@ -119,10 +119,15 @@ func (h *Handler) Status(w http.ResponseWriter, r *http.Request) {
 	diskUsed, diskTotal := utils.GetDiskUsage()
 	load1, load5, load15 := utils.GetLoadAvg()
 
+	statsResult, _ := h.collector.GetStats()
+
 	var activeConns int
-	connData, err := h.collector.GetConnections()
-	if err == nil && connData != nil {
-		activeConns = connData.ActiveConnections
+	var trafficData stats.TrafficData
+	var speedData stats.SpeedData
+	if statsResult != nil {
+		activeConns = statsResult.Connections.ActiveConnections
+		trafficData = statsResult.Traffic
+		speedData = statsResult.Speed
 	}
 
 	nodeInfo := map[string]interface{}{
@@ -138,7 +143,7 @@ func (h *Handler) Status(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	response := map[string]interface{}{
 		"node": nodeInfo,
 		"system": map[string]interface{}{
 			"cpu_percent":   cpuPercent,
@@ -151,6 +156,14 @@ func (h *Handler) Status(w http.ResponseWriter, r *http.Request) {
 			"load_5":        load5,
 			"load_15":       load15,
 		},
+		"traffic": map[string]interface{}{
+			"upload":   trafficData.Upload,
+			"download": trafficData.Download,
+		},
+		"speed": map[string]interface{}{
+			"upload":   speedData.Upload,
+			"download": speedData.Download,
+		},
 		"connections": map[string]interface{}{
 			"active": activeConns,
 		},
@@ -158,7 +171,18 @@ func (h *Handler) Status(w http.ResponseWriter, r *http.Request) {
 			"online_users":  h.limiter.GetOnlineUserCount(),
 			"total_devices": h.limiter.GetTotalDeviceCount(),
 		},
-	})
+	}
+
+	if sc, ok := h.collector.(*stats.SingBoxStatsCollector); ok {
+		if onlineUsers, err := sc.GetOnlineUsers(); err == nil {
+			response["online_details"] = onlineUsers
+			if len(onlineUsers) > 0 {
+				response["devices"].(map[string]interface{})["online_users"] = len(onlineUsers)
+			}
+		}
+	}
+
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (h *Handler) GetStats(w http.ResponseWriter, r *http.Request) {
