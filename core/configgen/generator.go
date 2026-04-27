@@ -55,9 +55,7 @@ type Inbound struct {
 	Tag           string           `json:"tag,omitempty"`
 	Listen        string           `json:"listen,omitempty"`
 	ListenPort    int              `json:"listen_port,omitempty"`
-	InterfaceName string           `json:"interface_name,omitempty"`
-	Inet4Address  string           `json:"inet4_address,omitempty"`
-	Inet6Address  string           `json:"inet6_address,omitempty"`
+	Address       []string         `json:"address,omitempty"`
 	MTU           int              `json:"mtu,omitempty"`
 	AutoRoute     bool             `json:"auto_route,omitempty"`
 	StrictRoute   bool             `json:"strict_route,omitempty"`
@@ -209,8 +207,11 @@ func (g *Generator) generate(req *DeployRequest) (*SingBoxConfig, error) {
 		Route: &RouteConfig{
 			Rules: []RouteRule{
 				{
+					Action: "sniff",
+				},
+				{
 					Protocol: []string{"dns"},
-					Action:   "sniff",
+					Action:   "hijack-dns",
 				},
 			},
 			DefaultDomainResolver: "google",
@@ -226,13 +227,12 @@ func (g *Generator) generate(req *DeployRequest) (*SingBoxConfig, error) {
 	switch inboundType {
 	case "tun":
 		cfg.Inbounds = append(cfg.Inbounds, Inbound{
-			Type:          "tun",
-			Tag:           "tun-in",
-			InterfaceName: "tun0",
-			Inet4Address:  "172.19.0.1/30",
-			MTU:           9000,
-			AutoRoute:     true,
-			StrictRoute:   true,
+			Type:      "tun",
+			Tag:       "tun-in",
+			Address:   []string{"172.19.0.1/30"},
+			MTU:       9000,
+			AutoRoute: true,
+			StrictRoute: true,
 		})
 	case "mixed":
 		cfg.Inbounds = append(cfg.Inbounds, Inbound{
@@ -252,11 +252,6 @@ func (g *Generator) generate(req *DeployRequest) (*SingBoxConfig, error) {
 	cfg.Outbounds = append(cfg.Outbounds, Outbound{
 		Type: "direct",
 		Tag:  "direct",
-	})
-
-	cfg.Outbounds = append(cfg.Outbounds, Outbound{
-		Type: "block",
-		Tag:  "block",
 	})
 
 	return cfg, nil
@@ -389,13 +384,12 @@ func (g *Generator) generateDefault() *SingBoxConfig {
 		},
 		Inbounds: []Inbound{
 			{
-				Type:          "tun",
-				Tag:           "tun-in",
-				InterfaceName: "tun0",
-				Inet4Address:  "172.19.0.1/30",
-				MTU:           9000,
-				AutoRoute:     true,
-				StrictRoute:   true,
+				Type:      "tun",
+				Tag:       "tun-in",
+				Address:   []string{"172.19.0.1/30"},
+				MTU:       9000,
+				AutoRoute: true,
+				StrictRoute: true,
 			},
 		},
 		Outbounds: []Outbound{

@@ -262,6 +262,10 @@ create_dirs() {
     { "tag": "direct", "type": "direct" }
   ],
   "route": {
+    "rules": [
+      { "action": "sniff" },
+      { "protocol": "dns", "action": "hijack-dns" }
+    ],
     "default_domain_resolver": "google",
     "final": "direct"
   }
