@@ -51,17 +51,17 @@ type DNSServer struct {
 }
 
 type Inbound struct {
-	Type          string           `json:"type"`
-	Tag           string           `json:"tag,omitempty"`
-	Listen        string           `json:"listen,omitempty"`
-	ListenPort    int              `json:"listen_port,omitempty"`
-	Address       []string         `json:"address,omitempty"`
-	MTU           int              `json:"mtu,omitempty"`
-	AutoRoute     bool             `json:"auto_route,omitempty"`
-	StrictRoute   bool             `json:"strict_route,omitempty"`
-	Users         []InboundUser    `json:"users,omitempty"`
-	TLS           *InboundTLS      `json:"tls,omitempty"`
-	Multiplex     *MultiplexConfig `json:"multiplex,omitempty"`
+	Type        string           `json:"type"`
+	Tag         string           `json:"tag,omitempty"`
+	Listen      string           `json:"listen,omitempty"`
+	ListenPort  int              `json:"listen_port,omitempty"`
+	Address     []string         `json:"address,omitempty"`
+	MTU         int              `json:"mtu,omitempty"`
+	AutoRoute   bool             `json:"auto_route,omitempty"`
+	StrictRoute bool             `json:"strict_route,omitempty"`
+	Users       []InboundUser    `json:"users,omitempty"`
+	TLS         *InboundTLS      `json:"tls,omitempty"`
+	Multiplex   *MultiplexConfig `json:"multiplex,omitempty"`
 }
 
 type InboundUser struct {
@@ -138,16 +138,11 @@ type RouteRule struct {
 
 type StatsConfig struct {
 	ClashAPI *ClashAPIConfig `json:"clash_api,omitempty"`
-	V2RayAPI *V2RayAPIConfig `json:"v2ray_api,omitempty"`
 }
 
 type ClashAPIConfig struct {
 	ExternalController string `json:"external_controller"`
 	Secret             string `json:"secret,omitempty"`
-}
-
-type V2RayAPIConfig struct {
-	Listen string `json:"listen"`
 }
 
 type Generator struct {
@@ -200,9 +195,6 @@ func (g *Generator) generate(req *DeployRequest) (*SingBoxConfig, error) {
 				ExternalController: "0.0.0.0:9090",
 				Secret:             "node-agent-stats",
 			},
-			V2RayAPI: &V2RayAPIConfig{
-				Listen: "127.0.0.1:10001",
-			},
 		},
 		Route: &RouteConfig{
 			Rules: []RouteRule{
@@ -227,11 +219,11 @@ func (g *Generator) generate(req *DeployRequest) (*SingBoxConfig, error) {
 	switch inboundType {
 	case "tun":
 		cfg.Inbounds = append(cfg.Inbounds, Inbound{
-			Type:      "tun",
-			Tag:       "tun-in",
-			Address:   []string{"172.19.0.1/30"},
-			MTU:       9000,
-			AutoRoute: true,
+			Type:        "tun",
+			Tag:         "tun-in",
+			Address:     []string{"172.19.0.1/30"},
+			MTU:         9000,
+			AutoRoute:   true,
 			StrictRoute: true,
 		})
 	case "mixed":
@@ -384,11 +376,11 @@ func (g *Generator) generateDefault() *SingBoxConfig {
 		},
 		Inbounds: []Inbound{
 			{
-				Type:      "tun",
-				Tag:       "tun-in",
-				Address:   []string{"172.19.0.1/30"},
-				MTU:       9000,
-				AutoRoute: true,
+				Type:        "tun",
+				Tag:         "tun-in",
+				Address:     []string{"172.19.0.1/30"},
+				MTU:         9000,
+				AutoRoute:   true,
 				StrictRoute: true,
 			},
 		},
