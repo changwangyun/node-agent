@@ -1,6 +1,7 @@
 package stats
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -155,20 +156,33 @@ func (s *SingBoxStatsCollector) GetTraffic() (*TrafficData, error) {
 }
 
 func (s *SingBoxStatsCollector) GetSpeed() (*SpeedData, error) {
-	body, err := s.doRequest("/traffic")
+	url := fmt.Sprintf("%s/traffic", s.baseURL)
+	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return &SpeedData{}, nil
 	}
-
-	var traffic clashTrafficResponse
-	if err := json.Unmarshal(body, &traffic); err != nil {
-		return &SpeedData{}, nil
+	if s.secret != "" {
+		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", s.secret))
 	}
 
-	return &SpeedData{
-		Upload:   traffic.Up,
-		Download: traffic.Down,
-	}, nil
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return &SpeedData{}, nil
+	}
+	defer resp.Body.Close()
+
+	scanner := bufio.NewScanner(resp.Body)
+	if scanner.Scan() {
+		var traffic clashTrafficResponse
+		if err := json.Unmarshal(scanner.Bytes(), &traffic); err == nil {
+			return &SpeedData{
+				Upload:   traffic.Up,
+				Download: traffic.Down,
+			}, nil
+		}
+	}
+
+	return &SpeedData{}, nil
 }
 
 func (s *SingBoxStatsCollector) GetConnections() (*ConnectionData, error) {
