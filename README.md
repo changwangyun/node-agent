@@ -198,7 +198,7 @@ node-agent/
 │   └── system.go                        # 系统信息采集（CPU / 内存 / 磁盘 / 负载 / Uptime）
 ├── deploy/
 │   ├── node-agent.service               # systemd 服务单元文件
-│   └── install.sh                       # 一键部署脚本（含源码编译 with_v2ray_api）
+│   └── install.sh                       # 一键部署脚本（含源码编译 with_v2ray_api,with_quic）
 ├── .github/
 │   └── workflows/
 │       ├── ci.yml                       # CI 测试工作流
@@ -681,7 +681,7 @@ if deltaUp > 0 {
 
 **文件**：[core/stats/v2ray_stats.go](file:///Volumes/koeyx/box/node-agent/core/stats/v2ray_stats.go)
 
-通过 V2Ray API 的 gRPC 接口采集按用户粒度的流量统计数据。**前提条件**：sing-box 必须使用 `-tags with_v2ray_api` 编译。
+通过 V2Ray API 的 gRPC 接口采集按用户粒度的流量统计数据。**前提条件**：sing-box 必须使用 `-tags with_v2ray_api,with_quic` 编译。
 
 **工作原理**：
 
@@ -1103,7 +1103,7 @@ GET /client-config?user_id=123
 
 通过 V2Ray API 查询按用户粒度的流量统计数据。
 
-**前提条件**：sing-box 必须使用 `-tags with_v2ray_api` 编译，且配置中启用了 `v2ray_api.stats`。
+**前提条件**：sing-box 必须使用 `-tags with_v2ray_api,with_quic` 编译，且配置中启用了 `v2ray_api.stats`。
 
 **查询参数**：
 
@@ -1154,7 +1154,7 @@ GET /client-config?user_id=123
 
 | 状态码 | 场景 |
 |--------|------|
-| 503 | V2Ray API 不可用（sing-box 未使用 with_v2ray_api 编译） |
+| 503 | V2Ray API 不可用（sing-box 未使用 with_v2ray_api,with_quic 编译） |
 | 500 | gRPC 查询失败 |
 
 **与 /stats 接口的区别**：
@@ -1624,7 +1624,7 @@ bash deploy/install.sh
 
 1. 检测系统架构（amd64/arm64/armv7）
 2. 安装 Go 编译环境（如不存在）
-3. 从源码编译 sing-box（含 `-tags with_v2ray_api`，支持按用户流量统计）
+3. 从源码编译 sing-box（含 `-tags with_v2ray_api,with_quic`，支持按用户流量统计和 Hysteria2）
 4. 若源码编译失败，回退到下载预编译二进制（不含按用户流量统计）
 5. 编译 Node Agent 二进制文件
 6. 安装到 `/usr/local/bin/`
@@ -1638,9 +1638,9 @@ bash deploy/install.sh
 **验证安装**：
 
 ```bash
-# 检查 sing-box 是否包含 v2ray_api
+# 检查 sing-box 是否包含 v2ray_api 和 quic
 sing-box version
-# 输出应包含 "with_v2ray_api"
+# 输出应包含 "with_v2ray_api" 和 "with_quic"
 
 # 检查 Node Agent 状态
 systemctl status node-agent
@@ -1659,19 +1659,19 @@ mkdir -p /etc/sing-box
 mkdir -p /var/lib/node-agent
 mkdir -p /var/log/node-agent
 
-# 3. 安装 sing-box（从源码编译，含 with_v2ray_api）
+# 3. 安装 sing-box（从源码编译，含 with_v2ray_api,with_quic）
 # 3a. 安装 Go
 wget https://go.dev/dl/go1.23.4.linux-amd64.tar.gz
 tar -C /usr/local -xzf go1.23.4.linux-amd64.tar.gz
 export PATH=$PATH:/usr/local/go/bin
 
 # 3b. 编译 sing-box
-go install -tags "with_v2ray_api" github.com/sagernet/sing-box/cmd/sing-box@latest
+go install -tags "with_v2ray_api,with_quic" github.com/sagernet/sing-box/cmd/sing-box@latest
 cp $(go env GOPATH)/bin/sing-box /usr/local/bin/
 chmod +x /usr/local/bin/sing-box
 
 # 3c. 验证
-sing-box version  # 应显示 with_v2ray_api
+sing-box version  # 应显示 with_v2ray_api 和 with_quic
 
 # 4. 创建配置文件
 cat > /etc/node-agent/config.json << 'EOF'
@@ -1999,7 +1999,8 @@ curl -s -H "X-Node-Token: $TOKEN" "$HOST/logs?lines=10" | jq '.lines[]'
 |----------|------|----------|
 | `sing-box config not found` | 未部署配置 | 通过 `POST /deploy` 部署协议配置 |
 | `legacy DNS servers is deprecated` | 使用了旧版 DNS 格式 | 确保使用 v1.6.0+ 版本，已自动使用新格式 |
-| `v2ray api is not included in this build` | sing-box 未使用 with_v2ray_api 编译 | 重新编译：`go install -tags with_v2ray_api github.com/sagernet/sing-box/cmd/sing-box@latest` |
+| `v2ray api is not included in this build` | sing-box 未使用 with_v2ray_api 编译 | 重新编译：`go install -tags "with_v2ray_api,with_quic" github.com/sagernet/sing-box/cmd/sing-box@latest` |
+| `QUIC is not included in this build` | sing-box 未使用 with_quic 编译（Hysteria2 需要） | 重新编译：`go install -tags "with_v2ray_api,with_quic" github.com/sagernet/sing-box/cmd/sing-box@latest` |
 | `certificate path not found` | TLS 证书路径错误 | 检查证书文件是否存在，或让系统自动生成自签名证书 |
 | `reality_private_key is required` | Reality 协议未提供私钥 | Deploy 请求中必须包含 `reality_private_key` |
 
@@ -2044,12 +2045,12 @@ curl -s -H "X-Node-Token: $TOKEN" "$HOST/logs?lines=10" | jq '.lines[]'
 1. 确认 sing-box 包含 v2ray_api：
    ```bash
    sing-box version
-   # 应显示 with_v2ray_api
+   # 应显示 with_v2ray_api 和 with_quic
    ```
 
 2. 若不含，重新编译：
    ```bash
-   go install -tags "with_v2ray_api" github.com/sagernet/sing-box/cmd/sing-box@latest
+   go install -tags "with_v2ray_api,with_quic" github.com/sagernet/sing-box/cmd/sing-box@latest
    cp $(go env GOPATH)/bin/sing-box /usr/local/bin/
    systemctl restart node-agent
    ```
@@ -2347,6 +2348,7 @@ public function deployToNode($node, $user, $protocol)
 - 移除废弃的 `dns` outbound，改用 `sniff` + `hijack-dns` 路由动作
 - `clash_api.listen` 重命名为 `external_controller`
 - 移除废弃的 `block` outbound 和 `inet4_address` 字段
+- sing-box 编译标签新增 `with_quic`（Hysteria2 协议依赖 QUIC 支持）
 
 **其他改进**：
 
@@ -2357,7 +2359,7 @@ public function deployToNode($node, $user, $protocol)
 - 新增 `/logs` 接口查询 sing-box 日志
 - V2Ray API 按用户流量统计（gRPC 客户端）
 - 新增 `GET /traffic/user` 接口
-- 安装脚本支持从源码编译 sing-box（含 `with_v2ray_api` 标签）
+- 安装脚本支持从源码编译 sing-box（含 `with_v2ray_api,with_quic` 标签）
 - GitHub Actions 自动编译发布（推送 tag 触发）
 - 跨平台编译支持（process_unix.go / process_windows.go）
 

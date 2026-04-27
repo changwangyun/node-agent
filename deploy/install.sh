@@ -207,15 +207,15 @@ install_binary() {
 
 install_singbox() {
     if command -v sing-box &>/dev/null; then
-        if sing-box version 2>/dev/null | grep -q "with_v2ray_api"; then
-            ok "sing-box 已安装(含 v2ray_api): $(sing-box version 2>/dev/null | head -1)"
+        if sing-box version 2>/dev/null | grep -q "with_v2ray_api" && sing-box version 2>/dev/null | grep -q "with_quic"; then
+            ok "sing-box 已安装(含 v2ray_api + quic): $(sing-box version 2>/dev/null | head -1)"
             return 0
         else
-            warn "当前 sing-box 不含 v2ray_api，需要重新编译以支持按用户流量统计"
+            warn "当前 sing-box 不含 v2ray_api 或 quic，需要重新编译以支持按用户流量统计和 Hysteria2 协议"
         fi
     fi
 
-    info "从源码编译 sing-box (含 with_v2ray_api 标签)..."
+    info "从源码编译 sing-box (含 with_v2ray_api,with_quic 标签)..."
 
     if ! command -v go &>/dev/null; then
         info "安装 Go 编译环境..."
@@ -239,13 +239,13 @@ install_singbox() {
     sb_ver=$(curl -fsSL https://api.github.com/repos/SagerNet/sing-box/releases/latest | grep '"tag_name"' | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
     if [ -z "$sb_ver" ]; then sb_ver="v1.12.0"; fi
 
-    info "编译 sing-box ${sb_ver} (with_v2ray_api)..."
+    info "编译 sing-box ${sb_ver} (with_v2ray_api,with_quic)..."
     local tmpdir
     tmpdir=$(mktemp -d)
     cd "${tmpdir}"
 
-    if ! go install -tags "with_v2ray_api" "github.com/sagernet/sing-box/cmd/sing-box@${sb_ver}"; then
-        warn "编译失败，尝试下载标准版(不含按用户流量统计)..."
+    if ! go install -tags "with_v2ray_api,with_quic" "github.com/sagernet/sing-box/cmd/sing-box@${sb_ver}"; then
+        warn "编译失败，尝试下载标准版(不含按用户流量统计和 Hysteria2)..."
         local pkg2
         case "$(uname -m)" in
             x86_64|amd64)   pkg2="amd64" ;;
@@ -261,13 +261,13 @@ install_singbox() {
             if [ -n "$sb_bin" ]; then
                 cp "$sb_bin" "${INSTALL_DIR}/sing-box"
                 chmod +x "${INSTALL_DIR}/sing-box"
-                warn "sing-box 已安装(标准版，不含按用户流量统计)"
+                warn "sing-box 已安装(标准版，不含按用户流量统计和 Hysteria2)"
             fi
         fi
     else
         cp "$(go env GOPATH)/bin/sing-box" "${INSTALL_DIR}/sing-box"
         chmod +x "${INSTALL_DIR}/sing-box"
-        ok "sing-box ${sb_ver} 已编译安装(含 with_v2ray_api)"
+        ok "sing-box ${sb_ver} 已编译安装(含 with_v2ray_api,with_quic)"
     fi
 
     cd -
