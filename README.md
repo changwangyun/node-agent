@@ -1,6 +1,6 @@
 # Node Agent — VPN 节点控制系统技术文档
 
-> 版本：1.5.0  
+> 版本：1.6.0  
 > 最后更新：2026-04-28
 
 ---
@@ -17,26 +17,29 @@
   - [4.1 配置管理模块 (config)](#41-配置管理模块-config)
   - [4.2 sing-box 进程管理模块 (core/singbox)](#42-sing-box-进程管理模块-coresingbox)
   - [4.3 配置动态生成模块 (core/configgen)](#43-配置动态生成模块-coreconfiggen)
-  - [4.4 流量统计模块 (core/stats)](#44-流量统计模块-corestats)
-  - [4.5 设备限制模块 (core/device)](#45-设备限制模块-coredevice)
-  - [4.6 心跳上报模块 (core/heartbeat)](#46-心跳上报模块-coreheartbeat)
-  - [4.7 系统信息采集模块 (utils)](#47-系统信息采集模块-utils)
+  - [4.4 TLS 证书自动生成模块 (core/configgen/certgen)](#44-tls-证书自动生成模块-coreconfiggencertgen)
+  - [4.5 流量统计模块 (core/stats)](#45-流量统计模块-corestats)
+  - [4.6 设备限制模块 (core/device)](#46-设备限制模块-coredevice)
+  - [4.7 心跳上报模块 (core/heartbeat)](#47-心跳上报模块-coreheartbeat)
+  - [4.8 系统信息采集模块 (utils)](#48-系统信息采集模块-utils)
 - [5. API 接口文档](#5-api-接口文档)
   - [5.1 认证方式](#51-认证方式)
   - [5.2 节点部署接口](#52-节点部署接口)
-  - [5.3 节点状态接口](#53-节点状态接口)
-  - [5.4 流量统计接口](#54-流量统计接口)
-  - [5.5 按用户流量统计接口](#55-按用户流量统计接口)
-  - [5.6 心跳数据接口](#56-心跳数据接口)
-  - [5.7 进程控制接口](#57-进程控制接口)
-  - [5.8 设备管理接口](#58-设备管理接口)
-  - [5.9 日志查询接口](#59-日志查询接口)
-  - [5.10 健康检查接口](#510-健康检查接口)
+  - [5.3 客户端配置查询接口](#53-客户端配置查询接口)
+  - [5.4 节点状态接口](#54-节点状态接口)
+  - [5.5 流量统计接口](#55-流量统计接口)
+  - [5.6 按用户流量统计接口](#56-按用户流量统计接口)
+  - [5.7 心跳数据接口](#57-心跳数据接口)
+  - [5.8 进程控制接口](#58-进程控制接口)
+  - [5.9 设备管理接口](#59-设备管理接口)
+  - [5.10 日志查询接口](#510-日志查询接口)
+  - [5.11 健康检查接口](#511-健康检查接口)
 - [6. 安全机制](#6-安全机制)
   - [6.1 Token 认证](#61-token-认证)
   - [6.2 IP 白名单](#62-ip-白名单)
   - [6.3 Deploy 签名验证](#63-deploy-签名验证)
   - [6.4 中间件执行链](#64-中间件执行链)
+  - [6.5 CORS 跨域支持](#65-cors-跨域支持)
 - [7. 配置参考](#7-配置参考)
   - [7.1 完整配置文件](#71-完整配置文件)
   - [7.2 配置项说明](#72-配置项说明)
@@ -45,17 +48,23 @@
   - [8.2 一键安装](#82-一键安装)
   - [8.3 手动安装](#83-手动安装)
   - [8.4 systemd 管理](#84-systemd-管理)
-- [9. 运维手册](#9-运维手册)
-  - [9.1 日常运维命令](#91-日常运维命令)
-  - [9.2 日志查看](#92-日志查看)
-  - [9.3 故障排查](#93-故障排查)
-  - [9.4 sing-box 配置模板](#94-sing-box-配置模板)
-- [10. 扩展指南](#10-扩展指南)
-  - [10.1 新增协议支持](#101-新增协议支持)
-  - [10.2 自定义统计后端](#102-自定义统计后端)
-  - [10.3 对接 Laravel 控制面](#103-对接-laravel-控制面)
-  - [10.4 多节点负载均衡](#104-多节点负载均衡)
-- [11. 设计决策与权衡](#11-设计决策与权衡)
+- [9. 客户端连接指南](#9-客户端连接指南)
+  - [9.1 获取客户端配置](#91-获取客户端配置)
+  - [9.2 使用 URI 连接](#92-使用-uri-连接)
+  - [9.3 使用 JSON 配置连接](#93-使用-json-配置连接)
+  - [9.4 各协议客户端参数说明](#94-各协议客户端参数说明)
+- [10. 运维手册](#10-运维手册)
+  - [10.1 日常运维命令](#101-日常运维命令)
+  - [10.2 日志查看](#102-日志查看)
+  - [10.3 故障排查](#103-故障排查)
+  - [10.4 sing-box 配置模板](#104-sing-box-配置模板)
+- [11. 扩展指南](#11-扩展指南)
+  - [11.1 新增协议支持](#111-新增协议支持)
+  - [11.2 自定义统计后端](#112-自定义统计后端)
+  - [11.3 对接 Laravel 控制面](#113-对接-laravel-控制面)
+  - [11.4 多节点负载均衡](#114-多节点负载均衡)
+- [12. 设计决策与权衡](#12-设计决策与权衡)
+- [13. 版本变更记录](#13-版本变更记录)
 
 ---
 
@@ -64,8 +73,10 @@
 Node Agent 是一个运行在每台 VPS 上的 VPN 节点控制守护进程，是整个 VPN 平台的**核心执行层**。它负责：
 
 - **sing-box 生命周期管理**：启动、停止、重启、崩溃自动恢复
-- **动态配置下发**：接收控制面指令，生成 sing-box 配置并热更新
+- **动态配置下发**：接收控制面指令，生成服务端 sing-box 配置并热更新
 - **多协议支持**：Hysteria2 / VLESS / Reality，可扩展
+- **服务端配置生成**：生成服务端入站配置（inbound），同时生成客户端连接配置
+- **TLS 证书管理**：自动生成自签名证书、支持 ACME 自动签发、支持自定义证书
 - **流量统计**：通过 Clash API 采集全局实时流量数据，通过 V2Ray API 采集按用户流量数据
 - **设备限制**：用户级设备绑定与并发会话控制
 - **心跳上报**：定时向控制面汇报节点状态、流量、在线用户数
@@ -110,6 +121,9 @@ Node Agent 是一个运行在每台 VPS 上的 VPN 节点控制守护进程，�
 │  │  │ V2Ray Stats Collector││   │
 │  │  │ (按用户流量统计)      ││   │
 │  │  └──────────────────────┘│   │
+│  │  ┌──────────────────────┐│   │
+│  │  │ CertGen (TLS证书)    ││   │
+│  │  └──────────────────────┘│   │
 │  └──────────────────────────┘   │
 │       │                         │
 │       ▼                         │
@@ -133,15 +147,17 @@ Node Agent 是一个运行在每台 VPS 上的 VPN 节点控制守护进程，�
 | 层级 | 组件 | 职责 |
 |------|------|------|
 | 业务层 | Laravel Control Plane | 用户注册、套餐购买、节点分配、计费结算 |
-| 执行层 | **Node Agent** | 接收指令、管理 sing-box、采集数据、上报状态 |
+| 执行层 | **Node Agent** | 接收指令、管理 sing-box、采集数据、上报状态、生成客户端配置 |
 | 网络层 | sing-box | 实际处理 VPN 流量（代理、路由、加密） |
 
-Node Agent 是业务层与网络层之间的**桥梁**，将高层业务指令翻译为底层 sing-box 配置，并将底层运行状态汇总上报给业务层。
+Node Agent 是业务层与网络层之间的**桥梁**，将高层业务指令翻译为底层 sing-box 服务端配置，同时生成客户端连接配置供用户使用，并将底层运行状态汇总上报给业务层。
 
 ### 2.3 数据流
 
 ```
-Laravel ──POST /deploy──▶ Node Agent ──生成 config.json──▶ sing-box restart
+Laravel ──POST /deploy──▶ Node Agent ──生成服务端 config.json──▶ sing-box restart
+                                    └──生成客户端配置──▶ 返回 client_config 给 Laravel
+Laravel ──GET /client-config──▶ Node Agent ──查询用户客户端配置──▶ 返回 URI + JSON
 Laravel ──GET /status──▶ Node Agent ──采集系统信息──▶ 返回 JSON
 Laravel ──GET /traffic/user──▶ Node Agent ──V2Ray API gRPC──▶ 按用户流量数据
 Node Agent ──POST /heartbeat──▶ Laravel ──存储/展示──▶ 管理后台
@@ -169,7 +185,8 @@ node-agent/
 │   │   ├── process_unix.go              # Unix 平台进程信号处理
 │   │   └── process_windows.go           # Windows 平台进程信号处理
 │   ├── configgen/
-│   │   └── generator.go                 # sing-box config.json 动态生成（多协议、多入站、V2Ray API 统计）
+│   │   ├── generator.go                 # sing-box config.json 动态生成（服务端入站配置 + 客户端配置 + URI 生成）
+│   │   └── certgen.go                   # TLS 自签名证书自动生成（ECDSA P256 + x509）
 │   ├── stats/
 │   │   ├── collector.go                 # 流量统计抽象层（Clash API 采集 + Fallback + Multi 降级）
 │   │   └── v2ray_stats.go               # 按用户流量统计（V2Ray API gRPC 客户端）
@@ -186,7 +203,7 @@ node-agent/
 │   └── workflows/
 │       ├── ci.yml                       # CI 测试工作流
 │       └── release.yml                  # 自动编译发布工作流
-└── test.php                             # Web 测试页面（API 测试 + Token 生成）
+└── test.php                             # Web 测试页面（API 测试 + Token 生成 + 客户端配置展示）
 ```
 
 **分层设计原则**：
@@ -267,8 +284,7 @@ type Config struct {
      │                       │  │
      │          Stop()       │  │ 进程异常退出
      │           │           │  ▼
-     │           ▼           │  Crashed
-     │       Stopping ◀──────┘   │
+     │       Stopping ◀──────┘  Crashed
      │           │               │ Watchdog 自动重启
      └───────────┘               │
              Stopped ◀───────────┘
@@ -313,6 +329,8 @@ type Config struct {
 | `GetState() ProcessState` | 获取当前状态 |
 | `GetUptime() time.Duration` | 获取运行时长 |
 | `GetPID() int` | 获取进程 PID |
+| `GetLastError() string` | 获取最近一次错误信息 |
+| `GetCrashTime() time.Time` | 获取最近一次崩溃时间 |
 | `CrashChannel() <-chan struct{}` | 获取崩溃通知 channel |
 
 #### Watchdog 自动恢复
@@ -324,13 +342,13 @@ func startWatchdog(mgr *singbox.Manager, cfg *config.Config) {
     ticker := time.NewTicker(interval)
     for range ticker.C {
         if !mgr.IsRunning() && mgr.GetState() == singbox.StateCrashed {
-            mgr.Start()  // 自动重启
+            mgr.Start()
         }
     }
 }
 ```
 
-Watchdog 以可配置间隔（默认 5 秒）检测 sing-box 状态，发现崩溃后自动拉起。
+Watchdog 以可配置间隔（默认 5 秒）检测 sing-box 状态，发现崩溃后自动拉起。若配置文件不存在则跳过重启，避免反复启动失败。
 
 ---
 
@@ -340,9 +358,12 @@ Watchdog 以可配置间隔（默认 5 秒）检测 sing-box 状态，发现崩�
 
 #### 功能
 
-- 根据 DeployRequest 动态生成完整的 sing-box config.json
+- 根据 DeployRequest 动态生成**服务端** sing-box config.json（入站配置）
+- 同时生成**客户端**连接配置（含 URI 和完整 JSON 配置）
 - 支持 Hysteria2 / VLESS / Reality 三种协议
-- 支持 tun / mixed 两种入站模式
+- 支持 TLS 自签名证书、ACME 自动签发、自定义证书
+- 支持 Hysteria2 混淆（obfs）和带宽限制
+- 支持 Reality 协议的密钥对和握手配置
 - 原子写入配置文件（先写 `.tmp` 再 `rename`）
 - 管理多用户部署记录
 
@@ -350,90 +371,154 @@ Watchdog 以可配置间隔（默认 5 秒）检测 sing-box 状态，发现崩�
 
 ```go
 type DeployRequest struct {
-    UserID           string `json:"user_id"`              // 用户 ID（必填）
-    NodeID           string `json:"node_id"`              // 节点 ID（必填）
-    Protocol         string `json:"protocol"`             // 协议：hysteria2 / vless / reality（必填）
-    Server           string `json:"server"`               // 服务器地址（必填）
-    Port             int    `json:"port"`                 // 服务器端口（必填）
-    Password         string `json:"password"`             // 密码 / Token（必填）
-    UUID             string `json:"uuid,omitempty"`       // VLESS/Reality UUID（可选，默认使用 Password）
-    SNI              string `json:"sni,omitempty"`        // TLS SNI（可选）
-    RealityPubKey    string `json:"reality_public_key,omitempty"`  // Reality 公钥
-    RealityShortID   string `json:"reality_short_id,omitempty"`    // Reality Short ID
-    InboundType      string `json:"inbound_type,omitempty"`        // 入站类型：tun / mixed
+    UserID   string `json:"user_id"`              // 用户 ID（必填）
+    NodeID   string `json:"node_id"`              // 节点 ID（必填）
+    Protocol string `json:"protocol"`             // 协议：hysteria2 / vless / reality（必填）
+    Server   string `json:"server"`               // 服务器地址（默认 0.0.0.0）
+    Port     int    `json:"port"`                 // 服务器端口（必填）
+    Password string `json:"password"`             // 密码 / Token
+
+    UUID string `json:"uuid,omitempty"`           // VLESS/Reality UUID（默认使用 Password）
+
+    SNI string `json:"sni,omitempty"`             // TLS SNI（默认使用 Server）
+
+    ObfsType string `json:"obfs_type,omitempty"`       // Hysteria2 混淆类型
+    ObfsPass string `json:"obfs_password,omitempty"`    // Hysteria2 混淆密码
+
+    UpMbps   int `json:"up_mbps,omitempty"`       // Hysteria2 上行带宽限制
+    DownMbps int `json:"down_mbps,omitempty"`      // Hysteria2 下行带宽限制
+
+    TLSCertPath string `json:"tls_cert_path,omitempty"` // 自定义 TLS 证书路径
+    TLSKeyPath  string `json:"tls_key_path,omitempty"`  // 自定义 TLS 密钥路径
+
+    ACMEDomain string `json:"acme_domain,omitempty"`    // ACME 自动签发域名
+    ACMEEmail  string `json:"acme_email,omitempty"`     // ACME 邮箱
+
+    RealityPrivateKey string `json:"reality_private_key,omitempty"` // Reality 私钥（服务端）
+    RealityPublicKey  string `json:"reality_public_key,omitempty"`  // Reality 公钥（客户端）
+    RealityShortID    string `json:"reality_short_id,omitempty"`    // Reality Short ID
+    RealityDest       string `json:"reality_dest,omitempty"`        // Reality 握手目标（默认 www.microsoft.com）
+    RealityDestPort   int    `json:"reality_dest_port,omitempty"`   // Reality 握手目标端口（默认 443）
 }
 ```
 
-#### 协议配置映射
+#### ClientConfigResult 结构
 
-**Hysteria2**：
+Deploy 成功后返回的客户端配置信息：
+
+```go
+type ClientConfigResult struct {
+    SingBoxConfig string `json:"singbox_config"`  // 完整的 sing-box 客户端 JSON 配置
+    URI           string `json:"uri"`             // 协议 URI（可直接导入客户端）
+    Protocol      string `json:"protocol"`        // 协议类型
+    Server        string `json:"server"`          // 服务器地址
+    Port          int    `json:"port"`            // 服务器端口
+    Insecure      bool   `json:"insecure"`        // 是否使用不安全 TLS（自签名证书时为 true）
+}
+```
+
+#### 服务端配置生成逻辑
+
+Deploy 时生成**服务端** sing-box 配置，核心流程：
+
+1. **确定 TLS 证书来源**：
+   - Reality 协议：不需要 TLS 证书
+   - 指定了 ACME 域名：使用 ACME 自动签发
+   - 指定了证书路径：使用自定义证书
+   - 均未指定：自动生成自签名证书（ECDSA P256，有效期 10 年）
+
+2. **生成服务端入站配置（inbound）**：
+   - Hysteria2：`type: "hysteria2"`，含 users、TLS、obfs、带宽限制
+   - VLESS：`type: "vless"`，含 users（UUID + flow）、TLS
+   - Reality：`type: "vless"`，含 Reality TLS（private_key、short_id、handshake）
+
+3. **生成客户端出站配置（outbound）**：
+   - 根据协议生成对应的客户端出站配置
+   - 自动从 Reality 私钥推导公钥
+   - 自签名证书时标记 `insecure: true`
+
+4. **生成客户端 URI**：
+   - Hysteria2：`hysteria2://password@server:port?sni=xxx`
+   - VLESS：`vless://uuid@server:port?security=tls&sni=xxx`
+   - Reality：`vless://uuid@server:port?security=reality&pbk=xxx&sid=xxx`
+
+#### 协议服务端配置映射
+
+**Hysteria2 服务端入站**：
 
 ```json
 {
   "type": "hysteria2",
-  "tag": "proxy",
-  "server": "xxx.com",
-  "server_port": 443,
-  "password": "user_token",
+  "tag": "hysteria2-in",
+  "listen": "0.0.0.0",
+  "listen_port": 443,
+  "users": [{"password": "user_password"}],
   "tls": {
     "enabled": true,
-    "server_name": "sni_value",
-    "insecure": false
-  }
+    "server_name": "example.com",
+    "certificate_path": "/path/to/cert.pem",
+    "key_path": "/path/to/key.pem"
+  },
+  "obfs": {"type": "salamander", "password": "obfs_pass"},
+  "up_mbps": 100,
+  "down_mbps": 100
 }
 ```
 
-**VLESS**：
+**VLESS 服务端入站**：
 
 ```json
 {
   "type": "vless",
-  "tag": "proxy",
-  "server": "xxx.com",
-  "server_port": 443,
-  "uuid": "user_uuid",
-  "flow": "xtls-rprx-vision",
+  "tag": "vless-in",
+  "listen": "0.0.0.0",
+  "listen_port": 443,
+  "users": [{"uuid": "user_uuid", "flow": "xtls-rprx-vision"}],
   "tls": {
     "enabled": true,
-    "server_name": "sni_value",
-    "insecure": false
+    "server_name": "example.com",
+    "certificate_path": "/path/to/cert.pem",
+    "key_path": "/path/to/key.pem"
   }
 }
 ```
 
-**Reality**（基于 VLESS + Reality TLS）：
+**Reality 服务端入站**：
 
 ```json
 {
   "type": "vless",
-  "tag": "proxy",
-  "server": "xxx.com",
-  "server_port": 443,
-  "uuid": "user_uuid",
-  "flow": "xtls-rprx-vision",
+  "tag": "reality-in",
+  "listen": "0.0.0.0",
+  "listen_port": 443,
+  "users": [{"uuid": "user_uuid", "flow": "xtls-rprx-vision"}],
   "tls": {
     "enabled": true,
-    "server_name": "sni_value",
+    "server_name": "www.microsoft.com",
     "reality": {
       "enabled": true,
-      "public_key": "reality_pub_key",
-      "short_id": "reality_short_id"
+      "private_key": "base64_private_key",
+      "short_id": ["abc123"],
+      "handshake": {
+        "server": "www.microsoft.com",
+        "server_port": 443
+      }
     }
   }
 }
 ```
 
-#### 生成的完整配置结构
+#### 生成的完整服务端配置结构
 
-每次 Deploy 会生成包含以下部分的完整 sing-box 配置：
+每次 Deploy 会生成包含以下部分的完整 sing-box 服务端配置：
 
 | 部分 | 内容 |
 |------|------|
 | `log` | 日志级别 info，启用时间戳 |
 | `dns` | Google DNS (tls, 8.8.8.8) + 阿里 DNS (udp, 223.5.5.5)，新格式（type + server） |
-| `inbounds` | tun（默认）或 mixed 入站 |
-| `outbounds` | 代理出站 + direct |
-| `route` | sniff + hijack-dns 规则动作，default_domain_resolver，final 走 proxy |
+| `inbounds` | 协议对应的服务端入站配置 |
+| `outbounds` | direct 出站 |
+| `route` | sniff + hijack-dns 规则动作，default_domain_resolver，final 走 direct |
 | `experimental` | Clash API (0.0.0.0:9090) + V2Ray API (127.0.0.1:10001, stats.enabled) |
 
 #### 原子写入机制
@@ -446,7 +531,61 @@ type DeployRequest struct {
 
 ---
 
-### 4.4 流量统计模块 (core/stats)
+### 4.4 TLS 证书自动生成模块 (core/configgen/certgen)
+
+**文件**：[core/configgen/certgen.go](file:///Volumes/koeyx/box/node-agent/core/configgen/certgen.go)
+
+#### 功能
+
+当 Hysteria2 或 VLESS 协议未提供 TLS 证书且未启用 ACME 时，自动生成自签名 TLS 证书。
+
+#### 证书规格
+
+| 属性 | 值 |
+|------|------|
+| 算法 | ECDSA P-256 |
+| 有效期 | 10 年（3650 天） |
+| 用途 | 数字签名 + 密钥加密 + 服务端认证 |
+| CN | SNI 域名 |
+| SAN | SNI 域名 |
+| 组织 | Node Agent Self-Signed |
+
+#### 自动生成逻辑
+
+```
+Deploy 请求
+  │
+  ├── Reality 协议？── 是 ──▶ 不需要证书
+  │
+  ├── 指定了 ACME 域名？── 是 ──▶ 使用 ACME 自动签发
+  │
+  ├── 指定了证书路径？── 是 ──▶ 使用自定义证书
+  │
+  └── 均未指定 ──▶ 自动生成自签名证书
+       │
+       ├── 证书已存在？── 是 ──▶ 跳过生成，复用已有证书
+       │
+       └── 证书不存在 ──▶ 生成新证书
+            │
+            ├── 证书保存到 {config_dir}/self-signed-cert.pem
+            └── 私钥保存到 {config_dir}/self-signed-key.pem
+```
+
+#### 关键方法
+
+| 方法 | 说明 |
+|------|------|
+| `GenerateSelfSignedCert(certPath, keyPath, domain)` | 生成自签名证书，已存在则跳过 |
+
+#### 注意事项
+
+- 自签名证书的客户端需要设置 `insecure: true` 才能连接
+- 生产环境建议使用 ACME 或自定义证书
+- 证书文件生成后会被持久化，重启不会重新生成
+
+---
+
+### 4.5 流量统计模块 (core/stats)
 
 **文件**：[core/stats/collector.go](file:///Volumes/koeyx/box/node-agent/core/stats/collector.go)
 
@@ -576,7 +715,7 @@ if deltaUp > 0 {
       "listen": "127.0.0.1:10001",
       "stats": {
         "enabled": true,
-        "outbounds": ["proxy", "direct"]
+        "outbounds": ["direct"]
       }
     }
   }
@@ -589,11 +728,11 @@ if deltaUp > 0 {
 |----------|----------|
 | `user>>>user-001>>>traffic>>>uplink` | 用户 `user-001` 的上传流量 |
 | `user>>>user-001>>>traffic>>>downlink` | 用户 `user-001` 的下载流量 |
-| `outbound>>>proxy>>>traffic>>>uplink` | 出站 `proxy` 的上传流量 |
+| `outbound>>>direct>>>traffic>>>uplink` | 出站 `direct` 的上传流量 |
 
 ---
 
-### 4.5 设备限制模块 (core/device)
+### 4.6 设备限制模块 (core/device)
 
 **文件**：[core/device/limiter.go](file:///Volumes/koeyx/box/node-agent/core/device/limiter.go)
 
@@ -650,7 +789,7 @@ ReleaseSession(userID)
 
 ---
 
-### 4.6 心跳上报模块 (core/heartbeat)
+### 4.7 心跳上报模块 (core/heartbeat)
 
 **文件**：[core/heartbeat/reporter.go](file:///Volumes/koeyx/box/node-agent/core/heartbeat/reporter.go)
 
@@ -704,7 +843,7 @@ ReleaseSession(userID)
 
 ---
 
-### 4.7 系统信息采集模块 (utils)
+### 4.8 系统信息采集模块 (utils)
 
 **文件**：[utils/system.go](file:///Volumes/koeyx/box/node-agent/utils/system.go)
 
@@ -756,7 +895,7 @@ HTTP 状态码：`401 Unauthorized`
 
 #### `POST /deploy`
 
-下发用户节点配置，生成 sing-box config.json 并重启 sing-box。
+下发用户节点配置，生成服务端 sing-box config.json 并重启 sing-box，同时返回客户端连接配置。
 
 **请求体**：
 
@@ -768,8 +907,7 @@ HTTP 状态码：`401 Unauthorized`
   "server": "hk1.xxx.com",
   "port": 443,
   "password": "token_xxx",
-  "sni": "hk1.xxx.com",
-  "inbound_type": "tun"
+  "sni": "hk1.xxx.com"
 }
 ```
 
@@ -780,14 +918,33 @@ HTTP 状态码：`401 Unauthorized`
 | `user_id` | string | 是 | 用户 ID |
 | `node_id` | string | 是 | 节点 ID |
 | `protocol` | string | 是 | 协议类型：`hysteria2` / `vless` / `reality` |
-| `server` | string | 是 | 服务器地址 |
+| `server` | string | 否 | 服务器地址（默认 `0.0.0.0`，客户端配置中会替换为 `YOUR_SERVER_IP`） |
 | `port` | int | 是 | 服务器端口 |
-| `password` | string | 是 | 认证密码/Token |
+| `password` | string | 否 | 认证密码/Token |
 | `uuid` | string | 否 | VLESS/Reality 的 UUID（默认使用 password） |
-| `sni` | string | 否 | TLS SNI |
-| `reality_public_key` | string | 否 | Reality 公钥（protocol=reality 时使用） |
+| `sni` | string | 否 | TLS SNI（默认使用 server） |
+| `obfs_type` | string | 否 | Hysteria2 混淆类型（如 `salamander`） |
+| `obfs_password` | string | 否 | Hysteria2 混淆密码 |
+| `up_mbps` | int | 否 | Hysteria2 上行带宽限制（Mbps） |
+| `down_mbps` | int | 否 | Hysteria2 下行带宽限制（Mbps） |
+| `tls_cert_path` | string | 否 | 自定义 TLS 证书路径 |
+| `tls_key_path` | string | 否 | 自定义 TLS 密钥路径 |
+| `acme_domain` | string | 否 | ACME 自动签发域名（启用后自动签发 Let's Encrypt 证书） |
+| `acme_email` | string | 否 | ACME 邮箱 |
+| `reality_private_key` | string | 否 | Reality 私钥（服务端，protocol=reality 时必填） |
+| `reality_public_key` | string | 否 | Reality 公钥（客户端使用，不填则从私钥自动推导） |
 | `reality_short_id` | string | 否 | Reality Short ID |
-| `inbound_type` | string | 否 | 入站类型：`tun`（默认）/ `mixed` |
+| `reality_dest` | string | 否 | Reality 握手目标（默认 `www.microsoft.com`） |
+| `reality_dest_port` | int | 否 | Reality 握手目标端口（默认 `443`） |
+
+**TLS 证书优先级**：
+
+```
+Reality 协议 → 不需要证书
+ACME 域名 → ACME 自动签发
+自定义证书路径 → 使用自定义证书
+均未指定 → 自动生成自签名证书
+```
 
 **成功响应** (`200 OK`)：
 
@@ -795,9 +952,28 @@ HTTP 状态码：`401 Unauthorized`
 {
   "success": true,
   "message": "deployed hysteria2 config for user 123",
-  "node_id": "n1"
+  "node_id": "n1",
+  "client_config": {
+    "singbox_config": "{...完整客户端JSON配置...}",
+    "uri": "hysteria2://token_xxx@hk1.xxx.com:443?sni=hk1.xxx.com#hysteria2-n1",
+    "protocol": "hysteria2",
+    "server": "hk1.xxx.com",
+    "port": 443,
+    "insecure": false
+  }
 }
 ```
+
+**client_config 字段说明**：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `singbox_config` | string | 完整的 sing-box 客户端 JSON 配置，可直接写入客户端配置文件 |
+| `uri` | string | 协议 URI，可导入支持该格式的客户端 |
+| `protocol` | string | 协议类型 |
+| `server` | string | 服务器地址（若 server 为 0.0.0.0 则替换为 YOUR_SERVER_IP） |
+| `port` | int | 服务器端口 |
+| `insecure` | bool | 是否使用不安全 TLS（自签名证书时为 true） |
 
 **错误响应**：
 
@@ -808,7 +984,47 @@ HTTP 状态码：`401 Unauthorized`
 
 ---
 
-### 5.3 节点状态接口
+### 5.3 客户端配置查询接口
+
+#### `GET /client-config`
+
+查询已部署用户的客户端连接配置。
+
+**查询参数**：
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `user_id` | string | 是 | 用户 ID |
+
+**请求示例**：
+
+```
+GET /client-config?user_id=123
+```
+
+**成功响应** (`200 OK`)：
+
+```json
+{
+  "singbox_config": "{...完整客户端JSON配置...}",
+  "uri": "hysteria2://token_xxx@hk1.xxx.com:443?sni=hk1.xxx.com#hysteria2-n1",
+  "protocol": "hysteria2",
+  "server": "hk1.xxx.com",
+  "port": 443,
+  "insecure": false
+}
+```
+
+**错误响应**：
+
+| 状态码 | 场景 |
+|--------|------|
+| 400 | 缺少 user_id 参数 |
+| 404 | 该用户未部署配置 |
+
+---
+
+### 5.4 节点状态接口
 
 #### `GET /status`
 
@@ -822,7 +1038,9 @@ HTTP 状态码：`401 Unauthorized`
     "singbox_running": true,
     "singbox_state": "running",
     "uptime_seconds": 3600,
-    "pid": 12345
+    "pid": 12345,
+    "last_error": "",
+    "crash_time": ""
   },
   "system": {
     "cpu_percent": 15.3,
@@ -845,9 +1063,11 @@ HTTP 状态码：`401 Unauthorized`
 }
 ```
 
+当 sing-box 发生崩溃时，`node` 中会包含 `last_error` 和 `crash_time` 字段。
+
 ---
 
-### 5.4 流量统计接口
+### 5.5 流量统计接口
 
 #### `GET /stats`
 
@@ -877,7 +1097,7 @@ HTTP 状态码：`401 Unauthorized`
 
 ---
 
-### 5.5 按用户流量统计接口
+### 5.6 按用户流量统计接口
 
 #### `GET /traffic/user`
 
@@ -921,7 +1141,7 @@ HTTP 状态码：`401 Unauthorized`
       "download": 52428800
     },
     {
-      "user_id": "outbound:proxy",
+      "user_id": "outbound:direct",
       "upload": 15728640,
       "download": 83886080
     }
@@ -946,7 +1166,7 @@ HTTP 状态码：`401 Unauthorized`
 
 ---
 
-### 5.6 心跳数据接口
+### 5.7 心跳数据接口
 
 #### `GET /heartbeat`
 
@@ -989,7 +1209,7 @@ HTTP 状态码：`401 Unauthorized`
 
 ---
 
-### 5.7 进程控制接口
+### 5.8 进程控制接口
 
 #### `POST /start`
 
@@ -1032,7 +1252,7 @@ HTTP 状态码：`401 Unauthorized`
 
 ---
 
-### 5.8 设备管理接口
+### 5.9 设备管理接口
 
 #### `POST /device/register`
 
@@ -1122,7 +1342,7 @@ HTTP 状态码：`401 Unauthorized`
 
 ---
 
-### 5.9 日志查询接口
+### 5.10 日志查询接口
 
 #### `GET /logs`
 
@@ -1139,8 +1359,8 @@ HTTP 状态码：`401 Unauthorized`
 ```json
 {
   "lines": [
-    "[singbox:err] \u001b[36mINFO\u001b[0m[0000] network: updated default interface eth0, index 2",
-    "[singbox:err] \u001b[31mFATAL\u001b[0m[0000] start service: create v2ray-server: v2ray api is not included in this build"
+    "[singbox:err] INFO[0000] network: updated default interface eth0, index 2",
+    "[singbox:err] FATAL[0000] start service: create v2ray-server: v2ray api is not included in this build"
   ],
   "count": 2
 }
@@ -1150,7 +1370,7 @@ HTTP 状态码：`401 Unauthorized`
 
 ---
 
-### 5.10 健康检查接口
+### 5.11 健康检查接口
 
 #### `GET /health`
 
@@ -1219,7 +1439,6 @@ signature = HMAC-SHA256(signing_key, message)
 **使用方式**（在 main.go 中添加）：
 
 ```go
-// 在 deploy 路由上单独应用签名验证
 deployHandler := middleware.DeploySignatureVerify("your-signing-key")(
     http.HandlerFunc(handler.Deploy),
 )
@@ -1252,17 +1471,22 @@ Node Agent 内置 CORS 中间件，允许从 Web 页面（如 test.php 测试页
 {
   "cors": {
     "enabled": true,
-    "allowed_origins": ["https://admin.example.com"],
-    "allowed_methods": ["GET", "POST"],
-    "allowed_headers": ["Content-Type", "X-Node-Token"]
+    "allowed_origins": ["*"]
   }
 }
 ```
 
+**CORS 响应头**（在中间件中固定配置）：
+
+| 响应头 | 值 |
+|--------|------|
+| `Access-Control-Allow-Methods` | `GET, POST, PUT, DELETE, OPTIONS` |
+| `Access-Control-Allow-Headers` | `Content-Type, X-Node-Token, X-Signature, X-Timestamp` |
+| `Access-Control-Max-Age` | `86400`（24 小时预检缓存） |
+
 **安全建议**：
 
 - 生产环境应将 `allowed_origins` 设为具体域名，避免使用 `*`
-- 仅开放必要的 HTTP 方法
 - `/health` 端点始终允许跨域访问
 
 ---
@@ -1282,9 +1506,7 @@ Node Agent 内置 CORS 中间件，允许从 Web 页面（如 test.php 测试页
   "data_dir": "/var/lib/node-agent",
   "cors": {
     "enabled": true,
-    "allowed_origins": ["*"],
-    "allowed_methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    "allowed_headers": ["Content-Type", "X-Node-Token", "Authorization"]
+    "allowed_origins": ["*"]
   },
   "singbox": {
     "binary_path": "/usr/local/bin/sing-box",
@@ -1357,8 +1579,8 @@ Node Agent 内置 CORS 中间件，允许从 Web 页面（如 test.php 测试页
 |------|------|--------|------|
 | `cors.enabled` | bool | `true` | 是否启用 CORS |
 | `cors.allowed_origins` | []string | `["*"]` | 允许的来源域名 |
-| `cors.allowed_methods` | []string | `["GET","POST","PUT","DELETE","OPTIONS"]` | 允许的 HTTP 方法 |
-| `cors.allowed_headers` | []string | `["Content-Type","X-Node-Token","Authorization"]` | 允许的请求头 |
+
+> CORS 的 `Access-Control-Allow-Methods` 和 `Access-Control-Allow-Headers` 在中间件中固定配置，无需手动设置。
 
 ---
 
@@ -1461,9 +1683,7 @@ cat > /etc/node-agent/config.json << 'EOF'
   "data_dir": "/var/lib/node-agent",
   "cors": {
     "enabled": true,
-    "allowed_origins": ["*"],
-    "allowed_methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    "allowed_headers": ["Content-Type", "X-Node-Token", "Authorization"]
+    "allowed_origins": ["*"]
   },
   "singbox": {
     "binary_path": "/usr/local/bin/sing-box",
@@ -1536,169 +1756,13 @@ journalctl -u node-agent -n 100
 
 ---
 
-## 9. 运维手册
+## 9. 客户端连接指南
 
-### 9.1 日常运维命令
+### 9.1 获取客户端配置
 
-```bash
-# 检查节点状态
-curl -s http://localhost:8080/status -H "X-Node-Token: your-token" | jq .
+通过 Deploy 接口部署协议配置后，响应中会包含 `client_config` 字段，提供客户端连接所需的所有信息。
 
-# 查看流量统计（全局）
-curl -s http://localhost:8080/stats -H "X-Node-Token: your-token" | jq .
-
-# 查看按用户流量统计（所有用户）
-curl -s http://localhost:8080/traffic/user -H "X-Node-Token: your-token" | jq .
-
-# 查看按用户流量统计（指定用户）
-curl -s "http://localhost:8080/traffic/user?user_id=user-001" -H "X-Node-Token: your-token" | jq .
-
-# 查看 sing-box 日志
-curl -s "http://localhost:8080/logs?lines=20" -H "X-Node-Token: your-token" | jq .
-
-# 重启 sing-box
-curl -X POST http://localhost:8080/restart -H "X-Node-Token: your-token"
-
-# 部署新配置
-curl -X POST http://localhost:8080/deploy \
-  -H "Content-Type: application/json" \
-  -H "X-Node-Token: your-token" \
-  -d '{
-    "user_id": "123",
-    "node_id": "node-hk-001",
-    "protocol": "hysteria2",
-    "server": "hk1.xxx.com",
-    "port": 443,
-    "password": "token_xxx"
-  }'
-```
-
-### 9.2 日志查看
-
-Node Agent 日志通过 systemd journal 输出：
-
-```bash
-# 实时跟踪日志
-journalctl -u node-agent -f
-
-# 查看错误日志
-journalctl -u node-agent -p err
-
-# 查看最近 1 小时日志
-journalctl -u node-agent --since "1 hour ago"
-
-# 搜索特定关键词
-journalctl -u node-agent | grep "watchdog"
-journalctl -u node-agent | grep "crashed"
-```
-
-日志前缀说明：
-
-| 前缀 | 来源 | 说明 |
-|------|------|------|
-| `[main]` | main.go | 程序启动/停止 |
-| `[http]` | middleware | HTTP 请求日志 |
-| `[watchdog]` | Watchdog | sing-box 崩溃恢复 |
-| `[heartbeat]` | heartbeat | 心跳上报状态 |
-| `[singbox]` | singbox manager | 进程管理 |
-| `[panic]` | middleware | panic 恢复 |
-
-### 9.3 故障排查
-
-#### sing-box 无法启动
-
-```bash
-# 1. 检查 sing-box 二进制是否存在
-ls -la /usr/local/bin/sing-box
-
-# 2. 手动测试 sing-box 配置
-sing-box check -c /etc/sing-box/config.json
-
-# 3. 查看 sing-box 错误输出
-journalctl -u node-agent | grep "sing-box"
-
-# 4. 检查配置文件内容
-cat /etc/sing-box/config.json | jq .
-```
-
-#### 心跳上报失败
-
-```bash
-# 1. 检查控制面连通性
-curl -I https://your-laravel-server.com
-
-# 2. 检查心跳日志
-journalctl -u node-agent | grep "heartbeat"
-
-# 3. 手动测试心跳
-curl -X POST https://your-laravel-server.com/api/node/heartbeat \
-  -H "Content-Type: application/json" \
-  -H "X-Node-Token: your-token" \
-  -H "X-Node-ID: node-hk-001" \
-  -d '{"node_id":"node-hk-001","timestamp":0}'
-```
-
-#### 流量统计为 0
-
-```bash
-# 1. 检查 Clash API 是否可访问（全局流量）
-curl http://localhost:9090/traffic -H "Authorization: Bearer node-agent-stats"
-
-# 2. 检查 sing-box 配置中是否启用了 Clash API
-cat /etc/sing-box/config.json | jq '.experimental'
-
-# 3. 检查连接数
-curl http://localhost:9090/connections -H "Authorization: Bearer node-agent-stats"
-```
-
-#### 按用户流量统计不可用
-
-```bash
-# 1. 检查 sing-box 是否包含 with_v2ray_api
-sing-box version
-# 输出应包含 "with_v2ray_api"
-
-# 2. 检查 V2Ray API 配置
-cat /etc/sing-box/config.json | jq '.experimental.v2ray_api'
-
-# 3. 测试 /traffic/user 接口
-curl -s http://localhost:8080/traffic/user -H "X-Node-Token: your-token"
-# 若返回 503，说明 sing-box 未使用 with_v2ray_api 编译
-
-# 4. 重新编译 sing-box
-go install -tags "with_v2ray_api" github.com/sagernet/sing-box/cmd/sing-box@latest
-sudo cp $(go env GOPATH)/bin/sing-box /usr/local/bin/sing-box
-sudo systemctl restart node-agent
-```
-
-#### sing-box 启动报废弃错误
-
-```bash
-# 查看 sing-box 日志
-curl -s "http://localhost:8080/logs?lines=10" -H "X-Node-Token: your-token" | jq .
-
-# 常见废弃错误及解决方案：
-# - "legacy DNS servers is deprecated" → 更新 DNS 格式为 type + server
-# - "missing route.default_domain_resolver" → 添加 default_domain_resolver 字段
-# - "dns outbound is deprecated" → 使用 route action: hijack-dns
-# - "clash_api.listen: unknown field" → 改用 external_controller
-```
-
-#### API 返回 401
-
-```bash
-# 检查配置文件中的 Token
-cat /etc/node-agent/config.json | jq '.api_token'
-
-# 使用正确 Token 测试
-curl http://localhost:8080/status -H "X-Node-Token: correct-token"
-```
-
-### 9.4 sing-box 配置模板
-
-> **重要**：sing-box 1.12+ 使用新 DNS 格式和路由规则动作，以下模板已更新为兼容格式。
-
-**Hysteria2**：
+**方式一：Deploy 时直接获取**
 
 ```bash
 curl -X POST http://localhost:8080/deploy \
@@ -1710,167 +1774,429 @@ curl -X POST http://localhost:8080/deploy \
     "protocol": "hysteria2",
     "server": "hk1.example.com",
     "port": 443,
-    "password": "hy2-password-here",
-    "sni": "hk1.example.com"
-  }'
+    "password": "hy2-password"
+  }' | jq '.client_config'
 ```
 
-**VLESS**：
+**方式二：通过 /client-config 接口查询**
 
 ```bash
-curl -X POST http://localhost:8080/deploy \
-  -H "Content-Type: application/json" \
-  -H "X-Node-Token: your-token" \
-  -d '{
-    "user_id": "user-002",
-    "node_id": "node-jp-001",
-    "protocol": "vless",
-    "server": "jp1.example.com",
-    "port": 443,
-    "password": "vless-password",
-    "uuid": "a3482e88-686a-4a58-8126-99c9df64b7bf",
-    "sni": "jp1.example.com"
-  }'
+curl -s "http://localhost:8080/client-config?user_id=user-001" \
+  -H "X-Node-Token: your-token" | jq .
 ```
 
-**Reality**：
+### 9.2 使用 URI 连接
+
+客户端配置中的 `uri` 字段可直接导入支持该格式的客户端：
+
+**Hysteria2 URI 格式**：
+
+```
+hysteria2://password@server:port?sni=xxx&insecure=1#hysteria2-node-id
+```
+
+**VLESS URI 格式**：
+
+```
+vless://uuid@server:port?encryption=none&flow=xtls-rprx-vision&security=tls&sni=xxx&type=tcp&fp=chrome#vless-node-id
+```
+
+**Reality URI 格式**：
+
+```
+vless://uuid@server:port?encryption=none&flow=xtls-rprx-vision&security=reality&sni=xxx&type=tcp&fp=chrome&pbk=public_key&sid=short_id#reality-node-id
+```
+
+**支持的客户端**：
+
+| 客户端 | 平台 | URI 导入 | JSON 配置 |
+|--------|------|----------|-----------|
+| sing-box | iOS/Android/macOS/Windows/Linux | 支持 | 支持 |
+| Clash Verge | Windows/macOS/Linux | 支持 | 需转换 |
+| v2rayN | Windows | 支持 | 需转换 |
+| Shadowrocket | iOS | 支持 | 不支持 |
+| NekoBox | Android | 支持 | 支持 |
+
+### 9.3 使用 JSON 配置连接
+
+客户端配置中的 `singbox_config` 字段是完整的 sing-box 客户端 JSON 配置，可直接用于 sing-box 客户端。
+
+**使用方法**：
+
+1. 将 `singbox_config` 内容保存为 `config.json`
+2. 使用 sing-box 客户端加载：`sing-box run -c config.json`
+
+**客户端配置结构**：
+
+| 部分 | 内容 |
+|------|------|
+| `log` | 日志级别 info，启用时间戳 |
+| `dns` | Google DNS (tls) + 阿里 DNS (udp) |
+| `inbounds` | TUN 模式入站（172.19.0.1/30，MTU 9000，自动路由） |
+| `outbounds` | 协议对应的代理出站 + direct 直连 |
+| `route` | sniff + hijack-dns，final 走 proxy |
+
+**注意**：客户端配置使用 TUN 模式，需要管理员/root 权限运行。移动端客户端（如 sing-box iOS/Android）会自动处理 TUN 权限。
+
+### 9.4 各协议客户端参数说明
+
+#### Hysteria2
+
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `password` | 认证密码 | 必填 |
+| `sni` | TLS SNI | 使用 server 值 |
+| `obfs_type` | 混淆类型（如 `salamander`） | 无 |
+| `obfs_password` | 混淆密码 | 无 |
+| `insecure` | 允许不安全 TLS（自签名证书时为 `true`） | `false` |
+
+**自签名证书说明**：当未提供 TLS 证书且未启用 ACME 时，Node Agent 会自动生成自签名证书。此时客户端配置中 `insecure` 为 `true`，客户端需要信任该证书才能连接。生产环境建议使用 ACME 或自定义证书。
+
+#### VLESS
+
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `uuid` | 用户 UUID | 使用 password 值 |
+| `flow` | 流控模式 | `xtls-rprx-vision` |
+| `sni` | TLS SNI | 使用 server 值 |
+| `insecure` | 允许不安全 TLS | `false` |
+
+#### Reality
+
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `uuid` | 用户 UUID | 使用 password 值 |
+| `flow` | 流控模式 | `xtls-rprx-vision` |
+| `sni` | TLS SNI（伪装域名） | 使用 reality_dest 值 |
+| `public_key` | Reality 公钥 | 从私钥自动推导 |
+| `short_id` | Short ID | 部署时指定 |
+
+**Reality 密钥对**：Reality 协议使用 X25519 密钥对。服务端配置 `private_key`，客户端配置 `public_key`。如果在 Deploy 请求中只提供了 `reality_private_key`，Node Agent 会自动推导出公钥并填入客户端配置。
+
+---
+
+## 10. 运维手册
+
+### 10.1 日常运维命令
 
 ```bash
-curl -X POST http://localhost:8080/deploy \
-  -H "Content-Type: application/json" \
-  -H "X-Node-Token: your-token" \
-  -d '{
-    "user_id": "user-003",
-    "node_id": "node-us-001",
-    "protocol": "reality",
-    "server": "us1.example.com",
-    "port": 443,
-    "password": "reality-password",
-    "uuid": "a3482e88-686a-4a58-8126-99c9df64b7bf",
-    "sni": "www.microsoft.com",
-    "reality_public_key": "xWjB2CjO7ZGm3YqCjL7mGqL9mWqB2CjO7ZGm3YqCjL4",
-    "reality_short_id": "6ba85179930d344f"
-  }'
+# 查看服务状态
+systemctl status node-agent
+
+# 查看实时日志
+journalctl -u node-agent -f
+
+# 查看最近 100 行日志
+journalctl -u node-agent -n 100
+
+# 重启服务
+systemctl restart node-agent
+
+# 停止服务
+systemctl stop node-agent
+
+# 修改配置后重启
+vi /etc/node-agent/config.json
+systemctl restart node-agent
 ```
 
-**生成的 sing-box 配置示例**（Hysteria2）：
+**通过 API 管理**：
+
+```bash
+TOKEN="your-api-token"
+HOST="http://localhost:8080"
+
+# 查看节点状态
+curl -s -H "X-Node-Token: $TOKEN" $HOST/status | jq .
+
+# 查看流量统计
+curl -s -H "X-Node-Token: $TOKEN" $HOST/stats | jq .
+
+# 查看按用户流量
+curl -s -H "X-Node-Token: $TOKEN" "$HOST/traffic/user" | jq .
+
+# 查看指定用户流量
+curl -s -H "X-Node-Token: $TOKEN" "$HOST/traffic/user?user_id=user-001" | jq .
+
+# 查看 sing-box 日志
+curl -s -H "X-Node-Token: $TOKEN" "$HOST/logs?lines=20" | jq .
+
+# 重启 sing-box
+curl -s -X POST -H "X-Node-Token: $TOKEN" $HOST/restart | jq .
+
+# 查看客户端配置
+curl -s -H "X-Node-Token: $TOKEN" "$HOST/client-config?user_id=user-001" | jq .
+
+# 部署协议配置
+curl -s -X POST -H "X-Node-Token: $TOKEN" -H "Content-Type: application/json" \
+  $HOST/deploy -d '{
+    "user_id": "user-001",
+    "node_id": "node-hk-001",
+    "protocol": "hysteria2",
+    "server": "hk1.example.com",
+    "port": 443,
+    "password": "hy2-password"
+  }' | jq .
+```
+
+### 10.2 日志查看
+
+**Node Agent 日志**（systemd journal）：
+
+```bash
+# 实时跟踪
+journalctl -u node-agent -f
+
+# 按时间过滤
+journalctl -u node-agent --since "2024-01-01 00:00:00" --until "2024-01-02 00:00:00"
+
+# 按优先级过滤
+journalctl -u node-agent -p err
+```
+
+**sing-box 日志**（通过 API 查询）：
+
+```bash
+# 最近 50 行日志
+curl -s -H "X-Node-Token: $TOKEN" "$HOST/logs?lines=50" | jq '.lines[]'
+
+# 最近 10 行日志
+curl -s -H "X-Node-Token: $TOKEN" "$HOST/logs?lines=10" | jq '.lines[]'
+```
+
+**日志前缀说明**：
+
+| 前缀 | 来源 | 说明 |
+|------|------|------|
+| `[singbox:out]` | sing-box stdout | 正常输出 |
+| `[singbox:err]` | sing-box stderr | 错误和警告信息 |
+| `[main]` | Node Agent 主进程 | 启动/停止/信号处理 |
+| `[watchdog]` | Watchdog | 崩溃检测和自动恢复 |
+| `[heartbeat]` | 心跳上报 | 心跳发送状态 |
+
+### 10.3 故障排查
+
+#### sing-box 启动失败
+
+**症状**：`/status` 显示 `singbox_state: "crashed"`
+
+**排查步骤**：
+
+1. 查看崩溃原因：
+   ```bash
+   curl -s -H "X-Node-Token: $TOKEN" $HOST/status | jq '.node.last_error'
+   curl -s -H "X-Node-Token: $TOKEN" $HOST/status | jq '.node.crash_time'
+   ```
+
+2. 查看 sing-box 日志：
+   ```bash
+   curl -s -H "X-Node-Token: $TOKEN" "$HOST/logs?lines=20" | jq '.lines[]'
+   ```
+
+3. 常见错误及解决方案：
+
+| 错误信息 | 原因 | 解决方案 |
+|----------|------|----------|
+| `sing-box config not found` | 未部署配置 | 通过 `POST /deploy` 部署协议配置 |
+| `legacy DNS servers is deprecated` | 使用了旧版 DNS 格式 | 确保使用 v1.6.0+ 版本，已自动使用新格式 |
+| `v2ray api is not included in this build` | sing-box 未使用 with_v2ray_api 编译 | 重新编译：`go install -tags with_v2ray_api github.com/sagernet/sing-box/cmd/sing-box@latest` |
+| `certificate path not found` | TLS 证书路径错误 | 检查证书文件是否存在，或让系统自动生成自签名证书 |
+| `reality_private_key is required` | Reality 协议未提供私钥 | Deploy 请求中必须包含 `reality_private_key` |
+
+#### 客户端无法连接
+
+**排查步骤**：
+
+1. 确认 sing-box 正在运行：
+   ```bash
+   curl -s -H "X-Node-Token: $TOKEN" $HOST/status | jq '.node.singbox_running'
+   ```
+
+2. 确认端口已监听：
+   ```bash
+   ss -tlnp | grep sing-box
+   ```
+
+3. 确认防火墙放行：
+   ```bash
+   # 检查 UFW
+   ufw status | grep 443
+   # 或检查 iptables
+   iptables -L -n | grep 443
+   ```
+
+4. 确认客户端配置正确：
+   - 自签名证书客户端需要开启 `insecure`
+   - Reality 协议需要正确的 `public_key` 和 `short_id`
+   - 服务器地址不能是 `0.0.0.0`，需要替换为实际 IP 或域名
+
+5. 获取客户端配置验证：
+   ```bash
+   curl -s -H "X-Node-Token: $TOKEN" "$HOST/client-config?user_id=user-001" | jq .
+   ```
+
+#### V2Ray API 不可用
+
+**症状**：`GET /traffic/user` 返回 503
+
+**解决方案**：
+
+1. 确认 sing-box 包含 v2ray_api：
+   ```bash
+   sing-box version
+   # 应显示 with_v2ray_api
+   ```
+
+2. 若不含，重新编译：
+   ```bash
+   go install -tags "with_v2ray_api" github.com/sagernet/sing-box/cmd/sing-box@latest
+   cp $(go env GOPATH)/bin/sing-box /usr/local/bin/
+   systemctl restart node-agent
+   ```
+
+3. 确认配置中启用了 V2Ray API：
+   ```bash
+   cat /etc/sing-box/config.json | jq '.experimental.v2ray_api'
+   ```
+
+### 10.4 sing-box 配置模板
+
+以下为 Node Agent 生成的各协议服务端配置模板，供参考和手动调试。
+
+**Hysteria2 服务端配置**：
 
 ```json
 {
-  "log": {
-    "level": "info",
-    "timestamp": true
-  },
+  "log": {"level": "info", "timestamp": true},
   "dns": {
     "servers": [
-      {
-        "tag": "google",
-        "type": "tls",
-        "server": "8.8.8.8"
-      },
-      {
-        "tag": "local",
-        "type": "udp",
-        "server": "223.5.5.5"
-      }
+      {"tag": "google", "type": "tls", "server": "8.8.8.8"},
+      {"tag": "local", "type": "udp", "server": "223.5.5.5"}
     ]
   },
-  "inbounds": [
-    {
-      "type": "tun",
-      "tag": "tun-in",
-      "address": ["10.0.0.1/24"]
+  "inbounds": [{
+    "type": "hysteria2",
+    "tag": "hysteria2-in",
+    "listen": "0.0.0.0",
+    "listen_port": 443,
+    "users": [{"password": "your-password"}],
+    "tls": {
+      "enabled": true,
+      "server_name": "example.com",
+      "certificate_path": "/etc/sing-box/self-signed-cert.pem",
+      "key_path": "/etc/sing-box/self-signed-key.pem"
     }
-  ],
-  "outbounds": [
-    {
-      "type": "hysteria2",
-      "tag": "proxy",
-      "server": "hk1.example.com",
-      "server_port": 443,
-      "password": "hy2-password-here",
-      "tls": {
-        "enabled": true,
-        "server_name": "hk1.example.com"
-      }
-    },
-    {
-      "type": "direct",
-      "tag": "direct"
-    }
-  ],
+  }],
+  "outbounds": [{"type": "direct", "tag": "direct"}],
   "route": {
-    "rules": [
-      { "action": "sniff" },
-      { "protocol": "dns", "action": "hijack-dns" }
-    ],
+    "rules": [{"action": "sniff"}, {"protocol": "dns", "action": "hijack-dns"}],
     "default_domain_resolver": "google",
-    "final": "proxy"
+    "final": "direct"
   },
   "experimental": {
-    "clash_api": {
-      "external_controller": "0.0.0.0:9090",
-      "secret": "node-agent-stats"
-    },
-    "v2ray_api": {
-      "listen": "127.0.0.1:10001",
-      "stats": {
-        "enabled": true,
-        "outbounds": ["proxy", "direct"]
-      }
-    }
+    "clash_api": {"external_controller": "0.0.0.0:9090", "secret": "node-agent-stats"},
+    "v2ray_api": {"listen": "127.0.0.1:10001", "stats": {"enabled": true, "outbounds": ["direct"]}}
   }
 }
 ```
 
-**sing-box 1.12+ 迁移要点**：
+**Reality 服务端配置**：
 
-| 旧格式（已废弃） | 新格式 | 说明 |
-|------------------|--------|------|
-| `dns.servers[].address` | `dns.servers[].type` + `server` | DNS 服务器格式变更 |
-| `outbounds[].type: "dns"` | `route.rules[].action: "hijack-dns"` | DNS 出站已移除，改用路由动作 |
-| `outbounds[].type: "block"` | `route.rules[].action: "reject"` | 阻断出站已移除，改用路由动作 |
-| `clash_api.listen` | `clash_api.external_controller` | 字段重命名 |
-| `tun.inet4_address` | `tun.address` (数组) | TUN 地址格式变更 |
-| 缺少 `route.default_domain_resolver` | 必须指定 | 域名解析器配置变为必填 |
-
----
-
-## 10. 扩展指南
-
-### 10.1 新增协议支持
-
-在 [core/configgen/generator.go](file:///Volumes/koeyx/box/node-agent/core/configgen/generator.go) 的 `generateOutbound` 方法中添加新协议分支：
-
-```go
-func (g *Generator) generateOutbound(req *DeployRequest) (*Outbound, error) {
-    switch req.Protocol {
-    case "hysteria2":
-        // ... 已有实现
-    case "vless":
-        // ... 已有实现
-    case "reality":
-        // ... 已有实现
-    case "shadowsocks":
-        return &Outbound{
-            Type:       "shadowsocks",
-            Tag:        "proxy",
-            Server:     req.Server,
-            ServerPort: req.Port,
-            Method:     req.Method,
-            Password:   req.Password,
-        }, nil
-    default:
-        return nil, fmt.Errorf("unsupported protocol: %s", req.Protocol)
+```json
+{
+  "log": {"level": "info", "timestamp": true},
+  "dns": {
+    "servers": [
+      {"tag": "google", "type": "tls", "server": "8.8.8.8"},
+      {"tag": "local", "type": "udp", "server": "223.5.5.5"}
+    ]
+  },
+  "inbounds": [{
+    "type": "vless",
+    "tag": "reality-in",
+    "listen": "0.0.0.0",
+    "listen_port": 443,
+    "users": [{"uuid": "user-uuid", "flow": "xtls-rprx-vision"}],
+    "tls": {
+      "enabled": true,
+      "server_name": "www.microsoft.com",
+      "reality": {
+        "enabled": true,
+        "private_key": "base64-private-key",
+        "short_id": ["abc12345"],
+        "handshake": {"server": "www.microsoft.com", "server_port": 443}
+      }
     }
+  }],
+  "outbounds": [{"type": "direct", "tag": "direct"}],
+  "route": {
+    "rules": [{"action": "sniff"}, {"protocol": "dns", "action": "hijack-dns"}],
+    "default_domain_resolver": "google",
+    "final": "direct"
+  },
+  "experimental": {
+    "clash_api": {"external_controller": "0.0.0.0:9090", "secret": "node-agent-stats"},
+    "v2ray_api": {"listen": "127.0.0.1:10001", "stats": {"enabled": true, "outbounds": ["direct"]}}
+  }
 }
 ```
 
-同时在 `DeployRequest` 结构体中添加协议特有字段。
+---
 
-### 10.2 自定义统计后端
+## 11. 扩展指南
 
-实现 `stats.Collector` 接口即可替换或扩展统计后端：
+### 11.1 新增协议支持
+
+以添加 Shadowsocks 协议为例：
+
+1. **在 `generator.go` 中添加协议处理**：
+
+```go
+func (g *Generator) generateShadowsocksInbound(req *DeployRequest) (*Inbound, error) {
+    return &Inbound{
+        Type:       "shadowsocks",
+        Tag:        "shadowsocks-in",
+        Listen:     "0.0.0.0",
+        ListenPort: req.Port,
+        Method:     req.Method,
+        Password:   req.Password,
+    }, nil
+}
+```
+
+2. **在 `generateInbound` 中添加分支**：
+
+```go
+case "shadowsocks":
+    return g.generateShadowsocksInbound(req)
+```
+
+3. **在 `buildClientConfig` 中添加客户端配置**：
+
+```go
+case "shadowsocks":
+    clientOutbound = Outbound{
+        Type:       "shadowsocks",
+        Tag:        "proxy",
+        Server:     server,
+        ServerPort: req.Port,
+        Method:     req.Method,
+        Password:   req.Password,
+    }
+    uri = g.buildShadowsocksURI(req, server)
+```
+
+4. **在 `DeployRequest` 中添加协议特有字段**：
+
+```go
+Method string `json:"method,omitempty"` // Shadowsocks 加密方法
+```
+
+5. **更新 `handler.go` 中的参数校验**（如需要）
+
+### 11.2 自定义统计后端
+
+实现 `stats.Collector` 接口即可替换默认的 Clash API 统计：
 
 ```go
 type Collector interface {
@@ -1880,145 +2206,172 @@ type Collector interface {
 }
 ```
 
-例如，基于 iptables 的统计器：
+例如，基于 iptables 的统计：
 
 ```go
-type IptablesCollector struct {
-    // ...
-}
+type IptablesCollector struct{}
 
 func (c *IptablesCollector) GetTraffic() (*TrafficData, error) {
     // 解析 iptables -L -v -x 输出
-    // 返回 upload/download 字节数
-}
-
-func (c *IptablesCollector) GetConnections() (*ConnectionData, error) {
-    // 解析 conntrack -C 输出
-    // 返回活跃连接数
-}
-
-func (c *IptablesCollector) GetStats() (*StatsResult, error) {
-    traffic, _ := c.GetTraffic()
-    connections, _ := c.GetConnections()
-    return &StatsResult{Traffic: *traffic, Connections: *connections}, nil
+    // 返回上传/下载字节数
 }
 ```
 
-在 main.go 中替换：
+在 `main.go` 中替换：
 
 ```go
-iptablesCollector := NewIptablesCollector()
-multiCollector := stats.NewMultiCollector(singboxCollector, iptablesCollector)
+customCollector := &IptablesCollector{}
+multiCollector := stats.NewMultiCollector(customCollector, fallbackCollector)
 ```
 
-### 10.3 对接 Laravel 控制面
+### 11.3 对接 Laravel 控制面
 
-Laravel 端需要实现以下 API 端点：
+Laravel 控制面需要实现以下 API 端点：
 
-#### `POST /api/node/heartbeat`
+**接收心跳**：
 
-接收 Node Agent 的心跳上报。
-
-**请求 Header**：
-
-| Header | 说明 |
-|--------|------|
-| `X-Node-Token` | 节点认证 Token |
-| `X-Node-ID` | 节点 ID |
-| `Content-Type` | `application/json` |
-
-**请求体**：与 [5.5 心跳数据接口](#55-心跳数据接口) 响应格式一致。
-
-**Laravel 端处理逻辑**：
-
-```php
-// 1. 验证 Token
-$node = Node::where('node_id', $request->header('X-Node-ID'))
-    ->where('token', $request->header('X-Node-Token'))
-    ->firstOrFail();
-
-// 2. 更新节点状态
-$node->update([
-    'status' => $payload['status']['singbox_running'] ? 'online' : 'offline',
-    'last_heartbeat' => now(),
-    'cpu_percent' => $payload['system']['cpu_percent'],
-    'mem_percent' => $payload['system']['mem_percent'],
-]);
-
-// 3. 记录流量
-TrafficLog::create([
-    'node_id' => $node->id,
-    'upload' => $payload['traffic']['upload'],
-    'download' => $payload['traffic']['download'],
-    'online_users' => $payload['online']['user_count'],
-]);
+```
+POST /api/node/heartbeat
+Header: X-Node-Token, X-Node-ID
+Body: {心跳数据 JSON}
 ```
 
-#### Laravel 向 Node Agent 下发配置
+**下发部署指令**（Laravel 调用 Node Agent）：
+
+```
+POST http://node-ip:8080/deploy
+Header: X-Node-Token
+Body: {部署请求 JSON}
+```
+
+**查询节点状态**（Laravel 调用 Node Agent）：
+
+```
+GET http://node-ip:8080/status
+Header: X-Node-Token
+```
+
+**Laravel 端示例代码**：
 
 ```php
-// 在 Laravel 控制器中
-public function deploy(Node $node, User $user)
+// 部署协议配置到节点
+public function deployToNode($node, $user, $protocol)
 {
     $response = Http::withHeaders([
-        'X-Node-Token' => $node->agent_token,
-        'Content-Type' => 'application/json',
-    ])->post("http://{$node->ip}:{$node->agent_port}/deploy", [
-        'user_id' => $user->id,
-        'node_id' => $node->node_id,
-        'protocol' => $node->protocol,
-        'server' => $node->server,
-        'port' => $node->port,
-        'password' => $user->vpn_token,
-        'sni' => $node->sni,
+        'X-Node-Token' => $node->api_token,
+    ])->post("http://{$node->ip}:8080/deploy", [
+        'user_id'   => $user->id,
+        'node_id'   => $node->id,
+        'protocol'  => $protocol->type,
+        'server'    => $node->domain ?? $node->ip,
+        'port'      => $protocol->port,
+        'password'  => $protocol->password,
+        'sni'       => $protocol->sni,
     ]);
 
-    return $response->json();
+    if ($response->successful()) {
+        $data = $response->json();
+        // 保存 client_config 供用户下载
+        $user->update([
+            'client_config' => $data['client_config']['singbox_config'],
+            'client_uri'    => $data['client_config']['uri'],
+        ]);
+    }
 }
 ```
 
-### 10.4 多节点负载均衡
+### 11.4 多节点负载均衡
 
-Node Agent 天然支持多节点架构。每个 VPS 运行独立的 Node Agent 实例，Laravel 控制面负责调度：
+**DNS 轮询方案**：
 
-**策略一：基于地域分配**
+1. 为每个节点分配子域名（如 `hk1.example.com`、`hk2.example.com`）
+2. 在 DNS 中配置 A 记录指向各节点 IP
+3. 用户连接时使用统一域名，DNS 自动轮询分配
 
-```
-用户选择地区 → Laravel 查询该地区可用节点 → 选择负载最低的节点 → 调用该节点 /deploy
-```
+**控制面调度方案**：
 
-**策略二：基于负载分配**
+1. Laravel 维护节点负载表（基于心跳数据）
+2. 用户请求连接时，Laravel 选择负载最低的节点
+3. 调用该节点的 `/deploy` 接口下发配置
+4. 返回客户端配置给用户
 
-```
-Laravel 定期收集所有节点心跳 → 按在线用户数/流量排序 → 新用户分配到负载最低的节点
-```
+**健康检查方案**：
 
-**策略三：基于权重分配**
-
-```
-每个节点配置权重 → Laravel 按权重轮询分配 → 支持动态调整权重
-```
+1. 外部监控器定期调用各节点的 `/health` 端点
+2. 节点不可用时自动从 DNS/负载均衡器中移除
+3. Node Agent 的 Watchdog 机制确保 sing-box 崩溃后自动恢复
 
 ---
 
-## 11. 设计决策与权衡
+## 12. 设计决策与权衡
 
 | 决策 | 选择 | 原因 | 权衡 |
 |------|------|------|------|
-| HTTP 框架 | 标准库 `net/http` | 零依赖、性能足够、可读性好 | 不如 gin/echo 便捷 |
-| 进程管理 | `exec.CommandContext` + `Setpgid` | 精确控制进程生命周期 | 不如 supervisor 功能丰富 |
-| 配置写入 | `write .tmp → rename` | 原子性保证 | 多一次文件系统操作 |
-| 全局流量统计 | Clash API + Fallback | 利用 sing-box 内置能力 | 依赖 sing-box API 稳定性 |
-| 按用户流量统计 | V2Ray API gRPC | 原生支持按用户/出站粒度统计 | 需 sing-box 使用 with_v2ray_api 编译 |
-| 设备管理 | 内存 map | 简单高效 | 进程重启后丢失（可接受，设备会重新注册） |
-| 心跳上报 | HTTP POST | 简单可靠 | 不如 gRPC 高效 |
-| 状态机 | 5 状态枚举 | 清晰表达进程生命周期 | 状态转换需严格校验 |
-| Token 认证 | Header + Query 双模式 | 兼容不同客户端 | Query Token 可能泄露到日志 |
-| CORS 支持 | 内置中间件 | 兼容 Web 测试页和前端管理面板 | 需注意生产环境安全配置 |
-| 日志捕获 | RingBuffer | 固定内存、实时查询 | 缓冲区满时旧日志被覆盖 |
-| 跨平台编译 | 平台特定文件 | Unix/Windows 进程信号差异 | 需维护多份平台代码 |
-| 依赖管理 | gopsutil + gRPC | 最小化外部依赖 | 二进制体积稍大 |
+| 进程管理 | 子进程模式 | sing-box 是独立二进制，子进程模式最稳定 | 需要处理僵尸进程、进程组信号 |
+| 配置写入 | 原子写入（tmp + rename） | 避免半写状态导致 sing-box 启动失败 | 需要同一文件系统 |
+| 流量统计 | Clash API + V2Ray API 双 API | Clash API 提供全局统计，V2Ray API 提供按用户统计 | V2Ray API 需要特殊编译标签 |
+| 统计降级 | MultiCollector 自动降级 | Clash API 不可用时自动切换到 Fallback | Fallback 精度较低 |
+| TLS 证书 | 自动生成自签名证书 | 零配置即可使用，降低部署门槛 | 自签名证书客户端需设置 insecure |
+| Reality 公钥 | 从私钥自动推导 | 减少客户端配置复杂度 | 依赖 X25519 密钥推导正确性 |
+| DNS 格式 | sing-box 1.12+ 新格式 | 避免废弃警告，面向未来兼容 | 旧版 sing-box 不兼容 |
+| 路由规则 | sniff + hijack-dns 动作 | 替代废弃的 dns outbound | 需要 sing-box 1.11+ |
+| CORS | 内置中间件 | 方便 Web 测试页面跨域访问 | 生产环境需限制 allowed_origins |
+| 日志捕获 | RingBuffer（200 行） | 内存可控，避免日志文件膨胀 | 仅保留最近 200 行 |
+| 客户端配置 | Deploy 时同时生成 | 一次部署即可获取所有连接信息 | 配置存储在内存中，重启后需重新部署 |
+| Watchdog | 配置文件存在时才重启 | 避免无配置时反复启动失败 | 首次部署前 sing-box 不会自动启动 |
 
 ---
 
-*本文档基于 Node Agent v1.5.0 源码生成，与代码实现完全一致。*
+## 13. 版本变更记录
+
+### v1.6.0 (2026-04-28)
+
+**重大变更**：
+
+- 配置生成从客户端模式改为**服务端模式**：生成服务端入站配置（inbound），同时生成客户端连接配置
+- 新增 TLS 证书自动生成模块（`certgen.go`）：支持自签名证书、ACME 自动签发、自定义证书
+- 新增客户端配置查询接口 `GET /client-config`
+- Deploy 接口响应新增 `client_config` 字段，包含完整客户端配置和 URI
+
+**新功能**：
+
+- Reality 协议支持：自动从私钥推导公钥，支持握手目标配置
+- Hysteria2 混淆（obfs）和带宽限制支持
+- VLESS + TLS 服务端入站配置
+- 客户端 URI 生成：Hysteria2 / VLESS / Reality 三种协议的 URI 格式
+
+**兼容性修复**：
+
+- 迁移到 sing-box 1.12+ 新 DNS 格式（`type` + `server` 替代 `address`）
+- 添加 `route.default_domain_resolver` 字段
+- 移除废弃的 `dns` outbound，改用 `sniff` + `hijack-dns` 路由动作
+- `clash_api.listen` 重命名为 `external_controller`
+- 移除废弃的 `block` outbound 和 `inet4_address` 字段
+
+**其他改进**：
+
+- 新增 CORS 跨域中间件
+- sing-box 日志实时捕获（RingBuffer，200 行）
+- 崩溃原因和崩溃时间追踪
+- `/status` 接口返回 `last_error` 和 `crash_time`
+- 新增 `/logs` 接口查询 sing-box 日志
+- V2Ray API 按用户流量统计（gRPC 客户端）
+- 新增 `GET /traffic/user` 接口
+- 安装脚本支持从源码编译 sing-box（含 `with_v2ray_api` 标签）
+- GitHub Actions 自动编译发布（推送 tag 触发）
+- 跨平台编译支持（process_unix.go / process_windows.go）
+
+### v1.0.0 (2026-04-25)
+
+**初始版本**：
+
+- sing-box 进程生命周期管理（启动/停止/重启/崩溃自动恢复）
+- 动态配置生成（Hysteria2 / VLESS / Reality）
+- HTTP API 服务（14 个接口端点）
+- 流量统计（Clash API 全局统计 + MultiCollector 降级）
+- 设备限制（设备绑定 + 并发会话控制）
+- 心跳上报（节点状态/流量/在线信息/系统信息）
+- 安全机制（Token 认证 / IP 白名单 / HMAC 签名验证）
+- 一键安装脚本
+- Web 测试页面（test.php）
+- systemd 服务管理
