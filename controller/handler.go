@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 
 	"node-agent/core/configgen"
 	"node-agent/core/device"
@@ -83,6 +84,8 @@ func (h *Handler) Status(w http.ResponseWriter, r *http.Request) {
 	state := h.mgr.GetState()
 	uptime := h.mgr.GetUptime()
 	pid := h.mgr.GetPID()
+	lastError := h.mgr.GetLastError()
+	crashTime := h.mgr.GetCrashTime()
 
 	cpuPercent, _ := utils.GetCPUUsage()
 	memPercent, memUsed, memTotal := utils.GetMemoryUsage()
@@ -95,29 +98,37 @@ func (h *Handler) Status(w http.ResponseWriter, r *http.Request) {
 		activeConns = connData.ActiveConnections
 	}
 
+	nodeInfo := map[string]interface{}{
+		"singbox_running": isRunning,
+		"singbox_state":   state.String(),
+		"uptime_seconds":  int64(uptime.Seconds()),
+		"pid":             pid,
+	}
+	if lastError != "" {
+		nodeInfo["last_error"] = lastError
+		if !crashTime.IsZero() {
+			nodeInfo["crash_time"] = crashTime.Format("2006-01-02T15:04:05Z07:00")
+		}
+	}
+
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"node": map[string]interface{}{
-			"singbox_running": isRunning,
-			"singbox_state":   state.String(),
-			"uptime_seconds":  int64(uptime.Seconds()),
-			"pid":             pid,
-		},
+		"node": nodeInfo,
 		"system": map[string]interface{}{
-			"cpu_percent": cpuPercent,
-			"mem_percent": memPercent,
-			"mem_used_mb": memUsed,
-			"mem_total_mb": memTotal,
-			"disk_used_gb": diskUsed,
+			"cpu_percent":   cpuPercent,
+			"mem_percent":   memPercent,
+			"mem_used_mb":   memUsed,
+			"mem_total_mb":  memTotal,
+			"disk_used_gb":  diskUsed,
 			"disk_total_gb": diskTotal,
-			"load_1":       load1,
-			"load_5":       load5,
-			"load_15":      load15,
+			"load_1":        load1,
+			"load_5":        load5,
+			"load_15":       load15,
 		},
 		"connections": map[string]interface{}{
 			"active": activeConns,
 		},
 		"devices": map[string]interface{}{
-			"online_users": h.limiter.GetOnlineUserCount(),
+			"online_users":  h.limiter.GetOnlineUserCount(),
 			"total_devices": h.limiter.GetTotalDeviceCount(),
 		},
 	})
@@ -201,9 +212,9 @@ func (h *Handler) RegisterDevice(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"allowed":       true,
-		"reason":        result.String(),
-		"device_count":  h.limiter.GetDeviceCount(req.UserID),
+		"allowed":      true,
+		"reason":       result.String(),
+		"device_count": h.limiter.GetDeviceCount(req.UserID),
 	})
 }
 
@@ -227,9 +238,9 @@ func (h *Handler) AcquireSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"allowed":           true,
-		"reason":            result.String(),
-		"concurrent_count":  h.limiter.GetConcurrentCount(req.UserID),
+		"allowed":          true,
+		"reason":           result.String(),
+		"concurrent_count": h.limiter.GetConcurrentCount(req.UserID),
 	})
 }
 
@@ -245,6 +256,21 @@ func (h *Handler) ReleaseSession(w http.ResponseWriter, r *http.Request) {
 	h.limiter.ReleaseSession(req.UserID)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
+	})
+}
+
+func (h *Handler) GetLogs(w http.ResponseWriter, r *http.Request) {
+	n := 50
+	if v := r.URL.Query().Get("lines"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 && parsed <= 200 {
+			n = parsed
+		}
+	}
+
+	logs := h.mgr.GetLogs(n)
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"lines": logs,
+		"count": len(logs),
 	})
 }
 

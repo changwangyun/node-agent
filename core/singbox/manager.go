@@ -1,6 +1,7 @@
 package singbox
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -36,6 +37,8 @@ func (s ProcessState) String() string {
 	}
 }
 
+const maxLogLines = 200
+
 type Manager struct {
 	mu        sync.RWMutex
 	cmd       *exec.Cmd
@@ -44,15 +47,62 @@ type Manager struct {
 	cfg       *config.Config
 	hasConfig bool
 
-	startTime time.Time
-	crashCh   chan struct{}
+	startTime   time.Time
+	crashCh     chan struct{}
+	lastError   string
+	crashTime   time.Time
+	logBuffer   *RingBuffer
+}
+
+type RingBuffer struct {
+	mu     sync.RWMutex
+	lines  []string
+	size   int
+	head   int
+	count  int
+}
+
+func NewRingBuffer(size int) *RingBuffer {
+	return &RingBuffer{
+		lines: make([]string, size),
+		size:  size,
+	}
+}
+
+func (r *RingBuffer) Write(line string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.lines[r.head] = line
+	r.head = (r.head + 1) % r.size
+	if r.count < r.size {
+		r.count++
+	}
+}
+
+func (r *RingBuffer) Lines(n int) []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if n > r.count {
+		n = r.count
+	}
+	result := make([]string, 0, n)
+	start := r.head - n
+	if start < 0 {
+		start += r.size
+	}
+	for i := 0; i < n; i++ {
+		idx := (start + i) % r.size
+		result = append(result, r.lines[idx])
+	}
+	return result
 }
 
 func NewManager(cfg *config.Config) *Manager {
 	return &Manager{
-		cfg:     cfg,
-		state:   StateStopped,
-		crashCh: make(chan struct{}, 16),
+		cfg:       cfg,
+		state:     StateStopped,
+		crashCh:   make(chan struct{}, 16),
+		logBuffer: NewRingBuffer(maxLogLines),
 	}
 }
 
@@ -63,6 +113,7 @@ func (m *Manager) Start() error {
 		return fmt.Errorf("sing-box is already running or starting")
 	}
 	m.state = StateStarting
+	m.lastError = ""
 	m.mu.Unlock()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -86,9 +137,11 @@ func (m *Manager) Start() error {
 
 	cmd := exec.CommandContext(ctx, binary, "run", "-c", configPath)
 	cmd.Dir = m.cfg.SingBox.WorkDir
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
 	setSysProcAttr(cmd)
+
+	var stderrBuf bytes.Buffer
+	cmd.Stdout = &logWriter{prefix: "[singbox:out] ", buf: m.logBuffer, fallback: os.Stdout}
+	cmd.Stderr = &logWriter{prefix: "[singbox:err] ", buf: m.logBuffer, fallback: os.Stderr, captureErr: &stderrBuf}
 
 	m.mu.Lock()
 	m.cmd = cmd
@@ -97,6 +150,10 @@ func (m *Manager) Start() error {
 
 	if err := cmd.Start(); err != nil {
 		cancel()
+		m.mu.Lock()
+		m.lastError = fmt.Sprintf("start failed: %v", err)
+		m.crashTime = time.Now()
+		m.mu.Unlock()
 		m.setState(StateCrashed)
 		return fmt.Errorf("start sing-box: %w", err)
 	}
@@ -104,12 +161,28 @@ func (m *Manager) Start() error {
 	m.setState(StateRunning)
 	m.startTime = time.Now()
 
-	go m.monitorProcess(ctx)
+	go m.monitorProcess(ctx, &stderrBuf)
 
 	return nil
 }
 
-func (m *Manager) monitorProcess(ctx context.Context) {
+type logWriter struct {
+	prefix    string
+	buf       *RingBuffer
+	fallback  *os.File
+	captureErr *bytes.Buffer
+}
+
+func (w *logWriter) Write(p []byte) (n int, err error) {
+	line := string(p)
+	w.buf.Write(w.prefix + line)
+	if w.captureErr != nil {
+		w.captureErr.Write(p)
+	}
+	return w.fallback.Write(p)
+}
+
+func (m *Manager) monitorProcess(ctx context.Context, stderrBuf *bytes.Buffer) {
 	err := m.cmd.Wait()
 
 	m.mu.Lock()
@@ -117,6 +190,21 @@ func (m *Manager) monitorProcess(ctx context.Context) {
 	m.mu.Unlock()
 
 	if wasRunning {
+		errMsg := "unknown reason"
+		if err != nil {
+			errMsg = err.Error()
+		}
+		if stderrBuf.Len() > 0 {
+			stderr := stderrBuf.String()
+			lastLines := lastNLines(stderr, 5)
+			errMsg = errMsg + "\nRecent stderr:\n" + lastLines
+		}
+
+		m.mu.Lock()
+		m.lastError = errMsg
+		m.crashTime = time.Now()
+		m.mu.Unlock()
+
 		m.setState(StateCrashed)
 		select {
 		case m.crashCh <- struct{}{}:
@@ -129,6 +217,24 @@ func (m *Manager) monitorProcess(ctx context.Context) {
 	if err != nil && ctx.Err() == nil {
 		fmt.Printf("[singbox] process exited unexpectedly: %v\n", err)
 	}
+}
+
+func lastNLines(s string, n int) string {
+	count := 0
+	idx := len(s)
+	for i := len(s) - 1; i >= 0; i-- {
+		if s[i] == '\n' {
+			count++
+			if count >= n {
+				idx = i + 1
+				break
+			}
+		}
+	}
+	if idx > 0 && idx < len(s) {
+		return s[idx:]
+	}
+	return s
 }
 
 func (m *Manager) Stop() error {
@@ -202,6 +308,25 @@ func (m *Manager) GetPID() int {
 		return m.cmd.Process.Pid
 	}
 	return 0
+}
+
+func (m *Manager) GetLastError() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.lastError
+}
+
+func (m *Manager) GetCrashTime() time.Time {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.crashTime
+}
+
+func (m *Manager) GetLogs(n int) []string {
+	if n <= 0 || n > maxLogLines {
+		n = 50
+	}
+	return m.logBuffer.Lines(n)
 }
 
 func (m *Manager) CrashChannel() <-chan struct{} {
