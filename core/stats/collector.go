@@ -412,14 +412,22 @@ func (m *MultiCollector) getOnlineUsersFromV2Ray() ([]*OnlineUser, error) {
 		}
 
 		last, exists := m.lastTraffic[ut.UserID]
-		isActive := !exists || ut.Upload > last.Upload || ut.Download > last.Download
-		if isActive {
-			result = append(result, &OnlineUser{
-				UserID:   ut.UserID,
-				Upload:   ut.Upload - last.Upload,
-				Download: ut.Download - last.Download,
-			})
+		var deltaUp, deltaDown int64
+		if exists {
+			deltaUp = ut.Upload - last.Upload
+			deltaDown = ut.Download - last.Download
+			if deltaUp <= 0 && deltaDown <= 0 {
+				continue
+			}
+		} else {
+			deltaUp = ut.Upload
+			deltaDown = ut.Download
 		}
+		result = append(result, &OnlineUser{
+			UserID:   ut.UserID,
+			Upload:   deltaUp,
+			Download: deltaDown,
+		})
 	}
 
 	newSnapshot := make(map[string]*UserTraffic, len(allTraffic))

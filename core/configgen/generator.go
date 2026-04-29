@@ -198,7 +198,9 @@ type V2RayAPIConfig struct {
 
 type V2RayAPIStats struct {
 	Enabled   bool     `json:"enabled"`
+	Inbounds  []string `json:"inbounds,omitempty"`
 	Outbounds []string `json:"outbounds,omitempty"`
+	Users     []string `json:"users,omitempty"`
 }
 
 type Generator struct {
@@ -382,6 +384,19 @@ func (g *Generator) rebuildConfig() (*SingBoxConfig, *ClientConfigResult, error)
 		cfg.Inbounds = append(cfg.Inbounds, *inbound)
 	}
 
+	var allUserIDs []string
+	var inboundTags []string
+	for _, req := range g.deploys {
+		allUserIDs = append(allUserIDs, req.UserID)
+	}
+	for _, ib := range cfg.Inbounds {
+		if ib.Tag != "" {
+			inboundTags = append(inboundTags, ib.Tag)
+		}
+	}
+	cfg.Stats.V2RayAPI.Stats.Users = allUserIDs
+	cfg.Stats.V2RayAPI.Stats.Inbounds = inboundTags
+
 	var lastClientCfg *ClientConfigResult
 	if lastReq != nil {
 		useSelfSigned := lastReq.Protocol != "reality" && lastReq.ACMEDomain == "" && (lastReq.TLSCertPath == "" || lastReq.TLSKeyPath == "")
@@ -456,6 +471,15 @@ func (g *Generator) generate(req *DeployRequest) (*SingBoxConfig, *ClientConfigR
 		return nil, nil, err
 	}
 	cfg.Inbounds = append(cfg.Inbounds, *inbound)
+
+	inboundTags := []string{}
+	for _, ib := range cfg.Inbounds {
+		if ib.Tag != "" {
+			inboundTags = append(inboundTags, ib.Tag)
+		}
+	}
+	cfg.Stats.V2RayAPI.Stats.Users = []string{req.UserID}
+	cfg.Stats.V2RayAPI.Stats.Inbounds = inboundTags
 
 	cfg.Outbounds = append(cfg.Outbounds, Outbound{
 		Type: "direct",
