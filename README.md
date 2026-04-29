@@ -1,7 +1,7 @@
 # Node Agent — VPN 节点控制系统技术文档
 
-> 版本：1.6.0  
-> 最后更新：2026-04-28
+> 版本：1.9.3  
+> 最后更新：2026-04-30
 
 ---
 
@@ -1206,9 +1206,23 @@ GET /client-config?user_id=123
 }
 ```
 
-**工作原理**：通过 Clash API 的 `/connections` 接口获取所有活跃连接，解析每个连接的 `inboundUser` 字段（即部署时设置的 `name`），按用户聚合后返回。
+**在线用户检测机制（双源合并）**：
 
-> **注意**：`/stats` 接口现在也会返回 `online_users`（在线用户数）、`online_details`（在线用户详情）和 `user_traffic`（V2Ray 按用户流量统计）字段。
+Node Agent 使用 Clash API 和 V2Ray API 双数据源检测在线用户，自动合并去重：
+
+| 协议 | Clash API `inboundUser` | V2Ray API 用户流量 | 检测方式 |
+|------|------------------------|-------------------|----------|
+| VLESS / Trojan / Reality | ✅ 有 | ✅ 有 | Clash API 精确匹配（含 IP） |
+| Hysteria2 | ❌ 无 | ✅ 有 | V2Ray API 流量增量检测 + Clash API 补充 IP/inbound |
+| 混合部署 | 部分有 | 全部有 | 双源合并，按 user_id 去重 |
+
+工作流程：
+1. **Clash API**：通过 `/connections` 获取活跃连接，解析 `inboundUser` 字段识别在线用户（VLESS/Trojan 等协议）
+2. **V2Ray API**：通过 `QueryStats` gRPC 获取每用户累计流量，对比上次快照检测流量增量判断活跃用户（Hysteria2 等无 inboundUser 的协议）
+3. **合并**：将两个数据源的结果按 `user_id` 合并去重，V2Ray API 的用户从 Clash API 连接中补充 inbound 和 IP 信息
+4. **降级**：任一数据源失败时，仍返回另一数据源的结果
+
+> **注意**：`/stats` 和 `/status` 接口也会返回 `online_users`（在线用户数）、`online_details`（在线用户详情）和 `user_traffic`（V2Ray 按用户流量统计）字段。
 
 ---
 
@@ -1564,7 +1578,7 @@ Node Agent 内置 CORS 中间件，允许从 Web 页面（如 test.php 测试页
     "token": "YOUR-CONTROL-PLANE-TOKEN",
     "node_id": "node-001",
     "timeout": 10,
-    "heartbeat_path": "/api/node/heartbeat"
+    "heartbeat_path": "/api/v1/node/heartbeat"
   },
   "device_limit": {
     "max_devices": 3,
@@ -1606,7 +1620,7 @@ Node Agent 内置 CORS 中间件，允许从 Web 页面（如 test.php 测试页
 | `token` | string | 空 | 控制面认证 Token |
 | `node_id` | string | `node-001` | 在控制面注册的节点 ID |
 | `timeout` | int | `10` | HTTP 请求超时（秒） |
-| `heartbeat_path` | string | `/api/node/heartbeat` | 心跳上报路径，可按控制面实际路由修改 |
+| `heartbeat_path` | string | `/api/v1/node/heartbeat` | 心跳上报路径，可按控制面实际路由修改 |
 
 #### device_limit 配置
 
@@ -1743,7 +1757,7 @@ cat > /etc/node-agent/config.json << 'EOF'
     "token": "your-control-plane-token",
     "node_id": "node-hk-001",
     "timeout": 10,
-    "heartbeat_path": "/api/node/heartbeat"
+    "heartbeat_path": "/api/v1/node/heartbeat"
   },
   "device_limit": {
     "max_devices": 3,
@@ -2282,7 +2296,7 @@ Laravel 控制面需要实现以下 API 端点：
 **接收心跳**：
 
 ```
-POST /api/node/heartbeat
+POST /api/v1/node/heartbeat
 Header: X-Node-Token, X-Node-ID
 Body: {心跳数据 JSON}
 ```
@@ -2375,6 +2389,95 @@ public function deployToNode($node, $user, $protocol)
 
 ## 13. 版本变更记录
 
+### v1.9.3 (2026-04-30)
+
+**修复**：
+
+- 修复混合协议部署（VLESS + Hysteria2）在线用户丢失：之前 Clash API 找到 VLESS 用户后直接返回，跳过 V2Ray API 导致 Hysteria2 用户丢失
+- 现在双源合并：同时查询 Clash API 和 V2Ray API，按 `user_id` 去重合并
+- 任一数据源失败时自动降级到另一数据源
+
+### v1.9.2 (2026-04-30)
+
+**修复**：
+
+- Hysteria2 连接的 `inbound` 字段为空：从 Clash API 的 `type` 字段（如 `hysteria2/hysteria2-in`）提取 inbound tag
+- `/traffic/user` 接口过滤掉 `outbound:direct` 条目，只返回真实用户
+
+### v1.9.1 (2026-04-30)
+
+**新功能**：
+
+- 在线用户 `inbound` 和 `ip` 字段填充：结合 Clash API 连接信息为 V2Ray API 检测到的用户补充 IP 和入站标签
+- Hysteria2 用户从 Clash API 活跃连接中提取 inbound tag 和 sourceIP
+
+### v1.9.0 (2026-04-30)
+
+**重大变更**：
+
+- 在线用户检测支持 Hysteria2 协议：Clash API 不返回 Hysteria2 的 `inboundUser`，新增 V2Ray API 回退机制
+- `MultiCollector` 注入 `V2RayStatsCollector`，当 Clash API 无法识别用户时，通过 V2Ray API 流量增量检测在线用户
+- sing-box 配置生成自动添加 `stats.users` 和 `stats.inbounds`，启用 V2Ray API 按用户流量统计
+
+**修复**：
+
+- 修复 `getOnlineUsersFromV2Ray` 中 `lastTraffic` 为 nil 时的 panic（导致 `/online` 返回 `internal server error`）
+- 过滤 `outbound:direct` 条目，不将其计入在线用户
+
+### v1.8.8 (2026-04-30)
+
+**修复**：
+
+- sing-box V2Ray API 配置添加 `stats.users` 和 `stats.inbounds` 字段，启用按用户流量统计
+- 之前只有 `outbounds: ["direct"]`，V2Ray API 只统计 outbound 流量，不统计用户级流量
+
+### v1.8.7 (2026-04-30)
+
+**修复**：
+
+- 修复 V2Ray stat name 解析 bug：`splitStatName` 自定义解析器处理 `>>>` 分隔符时第三个 `>` 残留到下一个 part
+- 改用 `strings.Split(name, ">>>")` 正确解析
+- 添加跳过 stat 的调试日志
+
+### v1.8.6 (2026-04-30)
+
+**修复**：
+
+- V2Ray gRPC 连接改用懒连接模式：移除 `grpc.WithBlock()`，避免 sing-box 重启期间 `context deadline exceeded`
+- `grpc.Dial()` 立即返回，实际连接在第一次 RPC 调用时建立
+- 查询失败时添加日志并标记重连
+
+### v1.8.5 (2026-04-30)
+
+**修复**：
+
+- 移除 `/traffic/user` 接口的 `IsEnabled()` 前置检查，允许 `refresh()` 内部自动重连
+- 添加 V2Ray gRPC 连接成功/失败日志
+
+### v1.8.4 (2026-04-30)
+
+**修复**：
+
+- 移除 `MultiCollector.GetOnlineUsers()` 中的 `IsEnabled()` 前置检查
+- `V2RayStatsCollector.refresh()` 内部已处理重连，无需外部预检
+
+### v1.8.3 (2026-04-30)
+
+**修复**：
+
+- 修复 `/online` 端点类型断言 bug：`MultiCollector` 断言为 `*SingBoxStatsCollector` 失败返回 `"clash api not available"`
+- 现在正确处理 `MultiCollector` 和 `SingBoxStatsCollector` 两种类型
+- `/status` 和 `/stats` 接口也添加 V2Ray API 回退
+
+### v1.8.2 (2026-04-30)
+
+**新功能**：
+
+- 心跳路径默认值改为 `/api/v1/node/heartbeat`（适配控制面 v1 路由前缀）
+- 安装脚本显示版本号
+- `node-agent -version` 命令行参数支持
+- Makefile 通过 LDFLAGS 注入版本号
+
 ### v1.8.1 (2026-04-30)
 
 **性能优化**：
@@ -2385,7 +2488,7 @@ public function deployToNode($node, $user, $protocol)
 
 **新功能**：
 
-- `control_plane.heartbeat_path` 配置项：心跳上报路径可配置，默认 `/api/node/heartbeat`，适配不同控制面路由
+- `control_plane.heartbeat_path` 配置项：心跳上报路径可配置，默认 `/api/v1/node/heartbeat`，适配不同控制面路由
 
 **修复**：
 

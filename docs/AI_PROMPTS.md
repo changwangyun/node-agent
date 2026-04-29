@@ -444,7 +444,7 @@ Laravel 调用此接口将用户的协议配置推送到节点，Node Agent 会�
 }
 ```
 
-> **工作原理**：通过 Clash API `/connections` 接口获取活跃连接，解析 `inboundUser` 字段（即 Deploy 时设置的 `name`），按用户聚合。前提：sing-box 需使用 `-tags with_v2ray_api,with_quic,with_clash_api` 编译，且用户配置中必须包含 `name` 字段。
+> **工作原理**：使用 Clash API 和 V2Ray API 双数据源检测在线用户，自动合并去重。VLESS/Trojan 等协议通过 Clash API `inboundUser` 精确识别；Hysteria2 等无 `inboundUser` 的协议通过 V2Ray API 流量增量检测。混合部署时双源合并按 `user_id` 去重。前提：sing-box 需使用 `-tags with_v2ray_api,with_quic,with_clash_api` 编译，且用户配置中必须包含 `name` 字段。
 
 #### 5. GET /traffic/user — 按用户查询流量（V2Ray API）
 
