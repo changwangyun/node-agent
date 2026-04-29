@@ -182,6 +182,11 @@ func (h *Handler) Status(w http.ResponseWriter, r *http.Request) {
 	if onlineUserCount > 0 {
 		response["online_details"] = onlineDetails
 		response["devices"].(map[string]interface{})["online_users"] = onlineUserCount
+	} else if mc, ok := h.collector.(*stats.MultiCollector); ok {
+		if users, err := mc.GetOnlineUsers(); err == nil && len(users) > 0 {
+			response["online_details"] = users
+			response["devices"].(map[string]interface{})["online_users"] = len(users)
+		}
 	}
 
 	writeJSON(w, http.StatusOK, response)
@@ -211,6 +216,11 @@ func (h *Handler) GetStats(w http.ResponseWriter, r *http.Request) {
 	if len(result.OnlineUsers) > 0 {
 		response["online_users"] = len(result.OnlineUsers)
 		response["online_details"] = result.OnlineUsers
+	} else if mc, ok := h.collector.(*stats.MultiCollector); ok {
+		if users, err := mc.GetOnlineUsers(); err == nil && len(users) > 0 {
+			response["online_users"] = len(users)
+			response["online_details"] = users
+		}
 	}
 
 	if h.v2rayStats != nil && h.v2rayStats.IsEnabled() {
@@ -223,16 +233,16 @@ func (h *Handler) GetStats(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) GetOnlineUsers(w http.ResponseWriter, r *http.Request) {
-	sc, ok := h.collector.(*stats.SingBoxStatsCollector)
-	if !ok {
-		writeError(w, http.StatusServiceUnavailable, "clash api not available")
-		return
-	}
+	var onlineUsers []*stats.OnlineUser
 
-	onlineUsers, err := sc.GetOnlineUsers()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "get online users failed: "+err.Error())
-		return
+	if mc, ok := h.collector.(*stats.MultiCollector); ok {
+		if users, err := mc.GetOnlineUsers(); err == nil {
+			onlineUsers = users
+		}
+	} else if sc, ok := h.collector.(*stats.SingBoxStatsCollector); ok {
+		if users, err := sc.GetOnlineUsers(); err == nil {
+			onlineUsers = users
+		}
 	}
 
 	response := map[string]interface{}{

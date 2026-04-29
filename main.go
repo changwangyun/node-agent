@@ -52,6 +52,7 @@ func main() {
 	multiCollector := stats.NewMultiCollector(singboxCollector, fallbackCollector)
 
 	v2rayStatsCollector := stats.NewV2RayStatsCollector(cfg.SingBox.V2RayAPIAddr)
+	multiCollector.SetV2RayStats(v2rayStatsCollector)
 
 	limiter := device.NewDeviceLimiter(&cfg.DeviceLimit)
 	reporter := heartbeat.NewReporter(cfg, mgr, multiCollector, limiter)

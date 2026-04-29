@@ -342,15 +342,22 @@ func (f *FallbackCollector) SetConnections(count int) {
 }
 
 type MultiCollector struct {
-	primary  Collector
-	fallback Collector
+	primary     Collector
+	fallback    Collector
+	v2rayStats  *V2RayStatsCollector
+	lastTraffic map[string]*UserTraffic
 }
 
 func NewMultiCollector(primary, fallback Collector) *MultiCollector {
 	return &MultiCollector{
-		primary:  primary,
-		fallback: fallback,
+		primary:     primary,
+		fallback:    fallback,
+		lastTraffic: make(map[string]*UserTraffic),
 	}
+}
+
+func (m *MultiCollector) SetV2RayStats(v *V2RayStatsCollector) {
+	m.v2rayStats = v
 }
 
 func (m *MultiCollector) GetTraffic() (*TrafficData, error) {
@@ -379,7 +386,48 @@ func (m *MultiCollector) GetStats() (*StatsResult, error) {
 
 func (m *MultiCollector) GetOnlineUsers() ([]*OnlineUser, error) {
 	if sc, ok := m.primary.(*SingBoxStatsCollector); ok {
-		return sc.GetOnlineUsers()
+		users, err := sc.GetOnlineUsers()
+		if err == nil && len(users) > 0 {
+			return users, nil
+		}
 	}
-	return nil, fmt.Errorf("primary collector does not support GetOnlineUsers")
+
+	if m.v2rayStats != nil && m.v2rayStats.IsEnabled() {
+		return m.getOnlineUsersFromV2Ray()
+	}
+
+	return nil, fmt.Errorf("no online user source available")
+}
+
+func (m *MultiCollector) getOnlineUsersFromV2Ray() ([]*OnlineUser, error) {
+	allTraffic, err := m.v2rayStats.GetAllUserTraffic()
+	if err != nil {
+		return nil, fmt.Errorf("v2ray api: %w", err)
+	}
+
+	var result []*OnlineUser
+	for _, ut := range allTraffic {
+		if ut.Upload == 0 && ut.Download == 0 {
+			continue
+		}
+
+		last, exists := m.lastTraffic[ut.UserID]
+		isActive := !exists || ut.Upload > last.Upload || ut.Download > last.Download
+		if isActive {
+			result = append(result, &OnlineUser{
+				UserID:   ut.UserID,
+				Upload:   ut.Upload - last.Upload,
+				Download: ut.Download - last.Download,
+			})
+		}
+	}
+
+	newSnapshot := make(map[string]*UserTraffic, len(allTraffic))
+	for _, ut := range allTraffic {
+		utCopy := *ut
+		newSnapshot[ut.UserID] = &utCopy
+	}
+	m.lastTraffic = newSnapshot
+
+	return result, nil
 }
