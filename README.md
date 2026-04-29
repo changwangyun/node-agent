@@ -1,6 +1,6 @@
 # Node Agent — VPN 节点控制系统技术文档
 
-> 版本：1.9.3  
+> 版本：1.10.0  
 > 最后更新：2026-04-30
 
 ---
@@ -63,8 +63,23 @@
   - [11.2 自定义统计后端](#112-自定义统计后端)
   - [11.3 对接 Laravel 控制面](#113-对接-laravel-控制面)
   - [11.4 多节点负载均衡](#114-多节点负载均衡)
-- [12. 设计决策与权衡](#12-设计决策与权衡)
-- [13. 版本变更记录](#13-版本变更记录)
+- [12. Laravel 控制面板开发指南](#12-laravel-控制面板开发指南)
+  - [12.1 数据库设计](#121-数据库设计)
+  - [12.2 核心服务实现](#122-核心服务实现)
+  - [12.3 心跳接收与节点监控](#123-心跳接收与节点监控)
+  - [12.4 用户流量采集与计费](#124-用户流量采集与计费)
+  - [12.5 Deploy 签名密码机制](#125-deploy-签名密码机制)
+  - [12.6 定时任务](#126-定时任务)
+- [13. 客户端开发指南](#13-客户端开发指南)
+  - [13.1 整体架构](#131-整体架构)
+  - [13.2 连接流程](#132-连接流程)
+  - [13.3 sing-box 客户端配置组装](#133-sing-box-客户端配置组装)
+  - [13.4 Hysteria2 性能优化配置](#134-hysteria2-性能优化配置)
+  - [13.5 流量监控与上报](#135-流量监控与上报)
+  - [13.6 iOS 客户端实现要点](#136-ios-客户端实现要点)
+  - [13.7 Android 客户端实现要点](#137-android-客户端实现要点)
+- [14. 设计决策与权衡](#14-设计决策与权衡)
+- [15. 版本变更记录](#15-版本变更记录)
 
 ---
 
@@ -2368,7 +2383,903 @@ public function deployToNode($node, $user, $protocol)
 
 ---
 
-## 12. 设计决策与权衡
+## 12. Laravel 控制面板开发指南
+
+本章节为 Laravel 控制面板的开发提供详细建议，涵盖数据库设计、核心服务、心跳监控、流量计费和定时任务。完整的 AI 编程提示词见 `docs/AI_PROMPTS.md`。
+
+### 12.1 数据库设计
+
+#### 核心表结构
+
+| 表名 | 用途 | 关键字段 |
+|------|------|----------|
+| `users` | 用户账户 | `uuid`(用户唯一标识), `status`, `traffic_used/limit`, `speed_limit`, `device_limit` |
+| `user_devices` | 设备绑定 | `user_id`, `device_id`, `platform`, `last_online_at` |
+| `nodes` | 节点信息 | `code`(节点编码), `api_url`, `api_token`, `password_secret`, `status`, `current_users` |
+| `node_protocols` | 节点协议配置 | `node_id`, `protocol`, `port`, `config`(JSON), `is_default` |
+| `plans` | 套餐定义 | `price_monthly/quarterly/yearly`, `traffic_limit`, `speed_limit`, `device_limit` |
+| `subscriptions` | 用户订阅 | `user_id`, `plan_id`, `status`, `traffic_used/limit`, `expired_at` |
+| `traffic_logs` | 流量日志 | `user_id`, `node_id`, `upload`, `download`, `date` |
+| `node_heartbeats` | 心跳记录 | `node_id`, `cpu_percent`, `mem_percent`, `online_users`, `singbox_running` |
+
+#### node_protocols.config JSON 格式
+
+```json
+// Hysteria2
+{"sni":"example.com","obfs_type":"salamander","obfs_password":"xxx","up_mbps":100,"down_mbps":200}
+
+// VLESS + Reality
+{"sni":"www.microsoft.com","reality_public_key":"xxx","reality_short_id":"xxx","flow":"xtls-rprx-vision"}
+
+// VLESS + TLS
+{"sni":"example.com","acme_domain":"example.com","acme_email":"admin@example.com"}
+```
+
+### 12.2 核心服务实现
+
+#### NodeAgentClient — 与 Node Agent 通信
+
+```php
+class NodeAgentClient
+{
+    public function deploy(Node $node, array $payload): array
+    {
+        return $this->post($node, '/deploy', $payload);
+    }
+
+    public function status(Node $node): array
+    {
+        return $this->get($node, '/status');
+    }
+
+    public function online(Node $node): array
+    {
+        return $this->get($node, '/online');
+    }
+
+    public function restart(Node $node): array
+    {
+        return $this->post($node, '/restart');
+    }
+
+    public function registerDevice(Node $node, string $userId, string $deviceId, string $ip): array
+    {
+        return $this->post($node, '/device/register', [
+            'user_id' => $userId,
+            'device_id' => $deviceId,
+            'ip' => $ip,
+        ]);
+    }
+
+    public function userTraffic(Node $node, ?string $userId = null): array
+    {
+        $path = '/traffic/user';
+        if ($userId) {
+            $path .= '?user_id=' . $userId;
+        }
+        return $this->get($node, $path);
+    }
+
+    private function get(Node $node, string $path): array
+    {
+        return Http::withHeaders(['X-Node-Token' => $node->api_token])
+            ->get(rtrim($node->api_url, '/') . $path)
+            ->json();
+    }
+
+    private function post(Node $node, string $path, array $data = []): array
+    {
+        return Http::withHeaders(['X-Node-Token' => $node->api_token])
+            ->post(rtrim($node->api_url, '/') . $path, $data)
+            ->json();
+    }
+}
+```
+
+#### SyncService — 用户配置同步
+
+```php
+class SyncService
+{
+    public function __construct(private NodeAgentClient $client) {}
+
+    public function syncUserToNode(User $user, Node $node, string $protocolType = null): array
+    {
+        $protocol = $this->resolveProtocol($node, $protocolType);
+        $password = $this->generatePassword($user, $node);
+
+        $payload = [
+            'user_id' => (string) $user->id,
+            'node_id' => $node->code,
+            'protocol' => $protocol->protocol,
+            'server' => '0.0.0.0',
+            'port' => $protocol->port,
+            'sni' => $protocol->config['sni'] ?? $node->server,
+        ];
+
+        if ($protocol->protocol === 'hysteria2') {
+            $payload['password'] = $password;
+            if (isset($protocol->config['obfs_type'])) {
+                $payload['obfs_type'] = $protocol->config['obfs_type'];
+                $payload['obfs_password'] = $protocol->config['obfs_password'] ?? '';
+            }
+            if ($user->speed_limit > 0) {
+                $payload['up_mbps'] = $user->speed_limit;
+                $payload['down_mbps'] = $user->speed_limit;
+            }
+        }
+
+        if ($protocol->protocol === 'vless') {
+            $payload['uuid'] = $user->uuid;
+        }
+
+        if ($protocol->protocol === 'reality') {
+            $payload['uuid'] = $user->uuid;
+            $payload['reality_private_key'] = $protocol->config['reality_private_key'];
+            $payload['reality_public_key'] = $protocol->config['reality_public_key'];
+            $payload['reality_short_id'] = $protocol->config['reality_short_id'];
+            $payload['reality_dest'] = $protocol->config['reality_dest'] ?? 'www.microsoft.com';
+            $payload['reality_dest_port'] = $protocol->config['reality_dest_port'] ?? 443;
+        }
+
+        return $this->client->deploy($node, $payload);
+    }
+
+    private function generatePassword(User $user, Node $node): string
+    {
+        $timestamp = time();
+        $message = $user->uuid . '.' . $timestamp;
+        $signature = hash_hmac('sha256', $message, $node->password_secret);
+        return base64_encode($message . '.' . $signature);
+    }
+
+    private function resolveProtocol(Node $node, ?string $protocolType): NodeProtocol
+    {
+        if ($protocolType) {
+            return $node->protocols()->where('protocol', $protocolType)->first()
+                ?? $node->protocols()->where('is_default', true)->firstOrFail();
+        }
+        return $node->protocols()->where('is_default', true)->firstOrFail();
+    }
+}
+```
+
+### 12.3 心跳接收与节点监控
+
+Node Agent 每 60 秒主动向 Laravel 上报心跳，Laravel 需实现接收端点：
+
+```php
+// routes/api.php
+Route::post('/v1/node/heartbeat', [NodeHeartbeatController::class, 'receive']);
+
+class NodeHeartbeatController extends Controller
+{
+    public function receive(Request $request)
+    {
+        $nodeId = $request->header('X-Node-ID');
+        $token = $request->header('X-Node-Token');
+
+        $node = Node::where('code', $nodeId)->firstOrFail();
+
+        if ($token !== $node->api_token) {
+            return response()->json(['error' => 'unauthorized'], 401);
+        }
+
+        $payload = $request->all();
+
+        $node->update([
+            'status' => $payload['status']['singbox_running'] ? 'online' : 'offline',
+            'last_heartbeat_at' => now(),
+            'current_users' => $payload['online']['user_count'] ?? 0,
+        ]);
+
+        NodeHeartbeat::create([
+            'node_id' => $node->id,
+            'cpu_percent' => $payload['system']['cpu_percent'] ?? 0,
+            'mem_percent' => $payload['system']['mem_percent'] ?? 0,
+            'active_connections' => $payload['online']['active_sessions'] ?? 0,
+            'online_users' => $payload['online']['user_count'] ?? 0,
+            'upload_speed' => $payload['traffic']['upload'] ?? 0,
+            'download_speed' => $payload['traffic']['download'] ?? 0,
+            'singbox_running' => $payload['status']['singbox_running'] ?? false,
+        ]);
+
+        return response()->json(['success' => true]);
+    }
+}
+```
+
+**⚠️ 心跳路径注意**：Node Agent 默认心跳路径为 `/api/v1/node/heartbeat`，可在 Node Agent 配置文件中通过 `heartbeat_path` 修改。确保 Laravel 路由与 Node Agent 配置一致。
+
+### 12.4 用户流量采集与计费
+
+#### 采集方式
+
+推荐两种流量采集方式，可组合使用：
+
+**方式一：主动拉取（推荐）**
+
+Laravel 定时任务每 5 分钟从各节点拉取流量数据：
+
+```php
+class CollectNodeStats implements ShouldQueue
+{
+    public function handle(NodeAgentClient $client)
+    {
+        $nodes = Node::where('status', 'online')->get();
+
+        foreach ($nodes as $node) {
+            try {
+                $stats = $client->userTraffic($node);
+
+                foreach ($stats['users'] ?? [] as $userData) {
+                    $user = User::where('uuid', $userData['user_id'])->first();
+                    if (!$user) continue;
+
+                    TrafficLog::updateOrCreate(
+                        [
+                            'user_id' => $user->id,
+                            'node_id' => $node->id,
+                            'date' => now()->toDateString(),
+                        ],
+                        [
+                            'upload' => $userData['upload'],
+                            'download' => $userData['download'],
+                        ]
+                    );
+                }
+            } catch (\Throwable $e) {
+                Log::warning("Failed to collect stats from node {$node->code}: " . $e->getMessage());
+            }
+        }
+    }
+}
+```
+
+**方式二：客户端上报**
+
+客户端每 30 秒调用 `POST /traffic/report` 上报流量，Laravel 记录并检查限额：
+
+```php
+class TrafficController extends Controller
+{
+    public function report(Request $request)
+    {
+        $request->validate([
+            'node_id' => 'required|string',
+            'upload' => 'required|integer',
+            'download' => 'required|integer',
+        ]);
+
+        $user = $request->user();
+        $node = Node::where('code', $request->node_id)->firstOrFail();
+
+        TrafficLog::updateOrCreate(
+            [
+                'user_id' => $user->id,
+                'node_id' => $node->id,
+                'date' => now()->toDateString(),
+            ],
+            [
+                'upload' => \DB::raw('upload + ' . $request->upload),
+                'download' => \DB::raw('download + ' . $request->download),
+            ]
+        );
+
+        $totalUsed = $user->traffic_used + $request->upload + $request->download;
+        $isLimited = $user->traffic_limit > 0 && $totalUsed >= $user->traffic_limit;
+
+        if ($isLimited) {
+            $user->update(['status' => 'limited']);
+        }
+
+        return response()->json([
+            'traffic_used' => $totalUsed,
+            'traffic_limit' => $user->traffic_limit,
+            'is_limited' => $isLimited,
+        ]);
+    }
+}
+```
+
+#### 流量限额处理
+
+```php
+class TrafficLimitService
+{
+    public function __construct(private NodeAgentClient $client) {}
+
+    public function checkAndEnforce(User $user): void
+    {
+        if ($user->traffic_limit <= 0) return;
+        if ($user->traffic_used < $user->traffic_limit) return;
+
+        $user->update(['status' => 'limited']);
+
+        // 从所有节点移除用户配置
+        foreach ($user->activeNodes as $node) {
+            try {
+                $this->client->stop($node);
+            } catch (\Throwable $e) {
+                Log::warning("Failed to stop node {$node->code}: " . $e->getMessage());
+            }
+        }
+
+        // 推送通知
+        if ($user->fcm_token) {
+            $this->pushNotification($user->fcm_token, '流量已用尽', '您的流量已达上限，请升级套餐');
+        }
+    }
+}
+```
+
+### 12.5 Deploy 签名密码机制
+
+Hysteria2 协议使用签名密码，由 Laravel 生成后传给客户端：
+
+```
+签名密码 = base64(uuid.timestamp.hmac_sha256_signature)
+```
+
+- `uuid`：用户唯一标识（users 表的 uuid 字段）
+- `timestamp`：当前 Unix 时间戳
+- `hmac_sha256_signature`：使用节点的 `password_secret` 对 `uuid.timestamp` 进行 HMAC-SHA256 签名
+- 密码有效期 24 小时（timestamp 过期后 Node Agent 仍接受连接，但 Laravel 可在续签时更新）
+
+**为什么用签名密码**：
+
+1. 每个节点有独立的 `password_secret`，密码不可跨节点使用
+2. 密码包含时间戳，可设置有效期
+3. 无需在 Node Agent 和 Laravel 之间同步密码数据库
+4. Node Agent 的 sing-box 配置中直接使用此密码作为 Hysteria2 的 `password` 字段
+
+### 12.6 定时任务
+
+```php
+// app/Console/Kernel.php
+
+protected function schedule(Schedule $schedule)
+{
+    // 每5分钟: 从节点采集用户流量
+    $schedule->command('nodes:collect-stats')->everyFiveMinutes();
+
+    // 每分钟: 检查过期订阅
+    $schedule->command('subscriptions:check-expired')->everyMinute();
+
+    // 每天0点: 重置月流量（按订阅周期）
+    $schedule->command('traffic:reset-monthly')->dailyAt('00:00');
+
+    // 每5分钟: 检查节点健康（心跳超时标记离线）
+    $schedule->command('nodes:check-health')->everyFiveMinutes();
+
+    // 每10分钟: 检查流量限额
+    $schedule->command('traffic:check-limits')->everyTenMinutes();
+}
+```
+
+**节点健康检查命令**：
+
+```php
+class CheckNodeHealth
+{
+    public function handle()
+    {
+        $threshold = now()->subMinutes(5);
+
+        Node::where('status', 'online')
+            ->where('last_heartbeat_at', '<', $threshold)
+            ->each(function ($node) {
+                $node->update(['status' => 'offline']);
+                Log::warning("Node {$node->code} marked offline (heartbeat timeout)");
+            });
+    }
+}
+```
+
+---
+
+## 13. 客户端开发指南
+
+本章节为 iOS / Android 客户端开发提供架构建议和实现要点。完整的 AI 编程提示词见 `docs/AI_PROMPTS.md`。
+
+### 13.1 整体架构
+
+```
+┌─────────────────────────────────────────────┐
+│                  客户端 App                   │
+├──────────────┬──────────────┬───────────────┤
+│   UI 层      │  业务逻辑层   │   服务层       │
+│  SwiftUI /   │  ViewModel   │  VPNManager   │
+│  Compose     │              │  ConfigBuilder│
+│              │              │  TrafficMonitor│
+├──────────────┴──────────────┴───────────────┤
+│           NetworkExtension / VpnService      │
+│              sing-box Mobile Library         │
+└─────────────────────────────────────────────┘
+         │ HTTP                    │ sing-box
+         ▼                        ▼
+   Laravel API              Node Agent
+```
+
+#### 目录结构（iOS）
+
+```
+VPNApp/
+├── Views/           LoginView, HomeView, NodesView, ProfileView
+├── ViewModels/      AuthVM, HomeVM, NodesVM, ProfileVM
+├── Services/        APIService, VPNManager, ConfigBuilder, TrafficMonitor
+├── Models/          User, Node, Subscription, TrafficSummary
+└── PacketTunnel/    PacketTunnelProvider (NetworkExtension Target)
+```
+
+#### 目录结构（Android）
+
+```
+app/
+├── ui/screen/       LoginScreen, HomeScreen, NodesScreen, ProfileScreen
+├── ui/viewmodel/    AuthVM, HomeVM, NodesVM, ProfileVM
+├── data/api/        ApiService (Retrofit)
+├── data/repository/ AuthRepo, NodeRepo, TrafficRepo
+├── service/         VpnService, SingboxManager, TrafficMonitor
+└── util/            ConfigBuilder
+```
+
+### 13.2 连接流程
+
+```
+1. 用户选择节点 → 点击连接按钮
+2. 调用 Laravel API: POST /connection/connect { node_id, protocol_type }
+3. Laravel 调用 Node Agent: POST /deploy { 协议配置 }
+4. Laravel 返回: { node参数, 签名密码, 配置参数 }
+5. 客户端 ConfigBuilder 本地组装 sing-box 配置
+6. 启动 VPN 隧道 (NetworkExtension / VpnService)
+7. sing-box Mobile Library 建立代理连接
+8. TrafficMonitor 每 30 秒上报流量
+9. 收到 is_limited=true → 自动断开
+```
+
+### 13.3 sing-box 客户端配置组装
+
+客户端从 Laravel API 获取节点参数后，本地组装完整 sing-box 配置：
+
+```json
+{
+  "log": { "level": "warn" },
+  "dns": {
+    "servers": [
+      { "tag": "google", "type": "tls", "server": "8.8.8.8" },
+      { "tag": "local", "type": "udp", "server": "223.5.5.5" }
+    ]
+  },
+  "inbounds": [
+    {
+      "type": "tun",
+      "tag": "tun-in",
+      "address": ["172.19.0.1/30", "fdfe:dcba:9876::1/126"],
+      "mtu": 4160,
+      "auto_route": true,
+      "strict_route": true
+    }
+  ],
+  "outbounds": [
+    { "...协议outbound..." },
+    { "type": "direct", "tag": "direct" },
+    { "type": "block", "tag": "block" },
+    { "type": "dns", "tag": "dns-out" }
+  ],
+  "route": {
+    "rules": [
+      { "action": "sniff" },
+      { "protocol": ["dns"], "action": "hijack-dns" }
+    ],
+    "default_domain_resolver": "google",
+    "final": "proxy"
+  }
+}
+```
+
+#### 各协议 Outbound 模板
+
+**Hysteria2**：
+
+```json
+{
+  "type": "hysteria2",
+  "tag": "proxy",
+  "server": "节点IP或域名",
+  "server_port": 443,
+  "password": "签名密码",
+  "up_mbps": 100,
+  "down_mbps": 200,
+  "tls": {
+    "enabled": true,
+    "server_name": "SNI域名",
+    "insecure": false,
+    "alpn": ["h3"]
+  },
+  "obfs": {
+    "type": "salamander",
+    "password": "混淆密码"
+  }
+}
+```
+
+**VLESS + Reality**：
+
+```json
+{
+  "type": "vless",
+  "tag": "proxy",
+  "server": "节点IP或域名",
+  "server_port": 443,
+  "uuid": "用户UUID",
+  "flow": "xtls-rprx-vision",
+  "tls": {
+    "enabled": true,
+    "server_name": "SNI域名",
+    "utls": { "enabled": true, "fingerprint": "chrome" },
+    "reality": {
+      "enabled": true,
+      "public_key": "Reality公钥",
+      "short_id": "ShortID"
+    }
+  }
+}
+```
+
+**VLESS + TLS**：
+
+```json
+{
+  "type": "vless",
+  "tag": "proxy",
+  "server": "节点IP或域名",
+  "server_port": 443,
+  "uuid": "用户UUID",
+  "tls": {
+    "enabled": true,
+    "server_name": "SNI域名"
+  }
+}
+```
+
+### 13.4 Hysteria2 性能优化配置
+
+Hysteria2 是基于 QUIC 的协议，客户端配置对性能影响很大。以下是关键优化点：
+
+#### TUN MTU 设置
+
+| 场景 | 推荐 MTU | 说明 |
+|------|----------|------|
+| Hysteria2 | **4160** | QUIC 在 UDP 之上，MTU 过大会导致 IP 分片，严重影响性能 |
+| VLESS/TCP | 9000 | TCP 协议可使用较大 MTU |
+
+**⚠️ 关键说明**：Hysteria2 的 QUIC 包在 UDP 之上传输，如果 TUN MTU 设为 9000，每个 QUIC 包会被 IP 层分片成多个小包。一旦丢失任何一个分片，整个 QUIC 包都要重传，性能急剧下降。4160 是经过测试的平衡值。
+
+#### ALPN 协商
+
+Hysteria2 客户端必须设置 `alpn: ["h3"]`，否则 TLS 握手时无法正确协商 HTTP/3 协议，导致连接失败或降级。
+
+#### Brutal 拥塞控制
+
+Hysteria2 的核心优势是 Brutal 拥塞控制算法，比标准 BBR 更激进地利用带宽。启用条件：
+
+- 客户端 outbound 设置 `up_mbps` 和 `down_mbps`
+- 服务端 inbound 设置 `ignore_client_bandwidth: true`（Node Agent 已自动处理）
+
+```json
+{
+  "type": "hysteria2",
+  "tag": "proxy",
+  "server": "...",
+  "server_port": 443,
+  "password": "...",
+  "up_mbps": 100,
+  "down_mbps": 200,
+  "tls": {
+    "enabled": true,
+    "server_name": "...",
+    "alpn": ["h3"]
+  }
+}
+```
+
+`up_mbps` / `down_mbps` 应根据用户套餐的 `speed_limit` 设置。如果用户没有速度限制，建议设为客户端实际带宽的 80%。
+
+#### 服务端系统优化
+
+Node Agent 安装脚本已自动优化以下系统参数，无需手动配置：
+
+| 参数 | 优化值 | 效果 |
+|------|--------|------|
+| `net.core.rmem_max` | 16MB | UDP 接收缓冲区，Hysteria2 性能瓶颈 |
+| `net.core.wmem_max` | 16MB | UDP 发送缓冲区 |
+| `net.ipv4.tcp_congestion_control` | bbr | TCP 层面加速 |
+| `net.ipv4.tcp_fastopen` | 3 | 减少 TCP 握手延迟 |
+| systemd CPU 调度 | `rr:99` | 实时调度，减少延迟抖动 |
+
+### 13.5 流量监控与上报
+
+#### 客户端流量上报
+
+```swift
+// iOS: TrafficMonitor
+class TrafficMonitor {
+    private var timer: Timer?
+    private var lastUpload: Int64 = 0
+    private var lastDownload: Int64 = 0
+
+    func startMonitoring() {
+        timer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+            self?.reportTraffic()
+        }
+    }
+
+    func reportTraffic() {
+        let currentUpload = getCurrentUpload()
+        let currentDownload = getCurrentDownload()
+        let deltaUpload = currentUpload - lastUpload
+        let deltaDownload = currentDownload - lastDownload
+        lastUpload = currentUpload
+        lastDownload = currentDownload
+
+        APIService.shared.reportTraffic(
+            nodeId: currentNodeId,
+            upload: deltaUpload,
+            download: deltaDownload
+        ) { result in
+            if case .success(let response) = result, response.is_limited {
+                VPNManager.shared.disconnect()
+            }
+        }
+    }
+}
+```
+
+#### 实时网速显示
+
+从 sing-box Clash API 读取实时速度（客户端连接到本地 Clash API）：
+
+```swift
+func fetchRealtimeSpeed(completion: @escaping (Int64, Int64) -> Void) {
+    guard let url = URL(string: "http://127.0.0.1:9090/traffic") else { return }
+
+    URLSession.shared.dataTask(with: url) { data, _, _ in
+        guard let data = data,
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let up = json["up"] as? Int64,
+              let down = json["down"] as? Int64 else { return }
+        completion(up, down)
+    }.resume()
+}
+```
+
+### 13.6 iOS 客户端实现要点
+
+#### sing-box Mobile Library 集成
+
+```swift
+// PacketTunnelProvider.swift
+import NetworkExtension
+import SingBoxLibrary
+
+class PacketTunnelProvider: NEPacketTunnelProvider {
+    private var singbox: SingBox?
+
+    override func startTunnel(options: [String: NSObject]?) async throws {
+        guard let config = options?["config"] as? String else {
+            throw NEPacketTunnelProviderError.invalidConfiguration
+        }
+
+        let fd = self.packetFlow.value(forKey: "socket") as! Int32
+
+        singbox = SingBox()
+        try singbox?.start(configPath: writeConfigToFile(config), tunFd: fd)
+
+        // 启动流量监控
+        startTrafficMonitor()
+    }
+
+    override func stopTunnel(with reason: NEProviderStopReason) async {
+        singbox?.stop()
+        singbox = nil
+    }
+
+    private func writeConfigToFile(_ config: String) -> String {
+        let path = NSTemporaryDirectory() + "sing-box-config.json"
+        try? config.write(toFile: path, atomically: true, encoding: .utf8)
+        return path
+    }
+}
+```
+
+#### VPNManager — 连接管理
+
+```swift
+class VPNManager: ObservableObject {
+    static let shared = VPNManager()
+    @Published var status: NEVPNStatus = .disconnected
+
+    func connect(node: Node, protocol: NodeProtocol, password: String) {
+        let config = ConfigBuilder.shared.buildConfig(
+            node: node,
+            protocol: `protocol`,
+            password: password
+        )
+
+        let options: [String: NSObject] = ["config": config as NSObject]
+
+        let vpnManager = NEVPNManager.shared()
+        let proto = NETunnelProviderProtocol()
+        proto.providerBundleIdentifier = "com.yourapp.PacketTunnel"
+        proto.providerConfiguration = options
+        proto.serverAddress = node.server
+        vpnManager.protocolConfiguration = proto
+        vpnManager.isEnabled = true
+        vpnManager.saveToPreferences { error in
+            if error == nil {
+                try? vpnManager.connection.startVPNTunnel(options: options)
+            }
+        }
+    }
+
+    func disconnect() {
+        NEVPNManager.shared().connection.stopVPNTunnel()
+    }
+}
+```
+
+#### 注意事项
+
+1. **NetworkExtension 权限**：需要在 Xcode 中开启 Network Extension 能力，添加 `com.apple.developer.networking.networkextension` 权限
+2. **sing-box 编译**：iOS 需要从源码编译 sing-box Mobile Library（XCFramework），参考 [sing-box 官方文档](https://sing-box.sagernet.org/installation/package/ios/)
+3. **TUN MTU**：iOS 的 NetworkExtension 对 MTU 有限制，建议设为 4160（Hysteria2）或 9000（VLESS）
+4. **后台保活**：iOS VPN 连接后系统自动保活，但 App 被杀后流量上报会中断，建议在 `PacketTunnelProvider` 中实现流量上报
+5. **Keychain 存储**：JWT Token 和用户凭证必须存储在 Keychain，不要用 UserDefaults
+
+### 13.7 Android 客户端实现要点
+
+#### sing-box AAR Library 集成
+
+```kotlin
+class SingboxVpnService : VpnService() {
+    private var singboxProcess: Long = 0
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val config = intent?.getStringExtra("config") ?: return START_NOT_STICKY
+
+        val fd = Builder()
+            .addAddress("172.19.0.1", 30)
+            .addRoute("0.0.0.0", 0)
+            .addDnsServer("8.8.8.8")
+            .setSession("VPN")
+            .setMtu(4160)
+            .establish()?.fd ?: return START_NOT_STICKY
+
+        singboxProcess = Singbox.start(config, fd)
+        return START_STICKY
+    }
+
+    override fun onDestroy() {
+        Singbox.stop(singboxProcess)
+        super.onDestroy()
+    }
+}
+```
+
+#### ConfigBuilder — 配置组装
+
+```kotlin
+object ConfigBuilder {
+
+    fun buildHysteria2Config(
+        server: String, port: Int, password: String,
+        sni: String, upMbps: Int, downMbps: Int,
+        obfsType: String? = null, obfsPassword: String? = null
+    ): String {
+        val outbound = mutableMapOf<String, Any>(
+            "type" to "hysteria2",
+            "tag" to "proxy",
+            "server" to server,
+            "server_port" to port,
+            "password" to password,
+            "up_mbps" to upMbps,
+            "down_mbps" to downMbps,
+            "tls" to mapOf(
+                "enabled" to true,
+                "server_name" to sni,
+                "alpn" to listOf("h3")
+            )
+        )
+
+        if (obfsType != null) {
+            outbound["obfs"] = mapOf(
+                "type" to obfsType,
+                "password" to (obfsPassword ?: "")
+            )
+        }
+
+        return buildFullConfig(outbound)
+    }
+
+    fun buildVlessRealityConfig(
+        server: String, port: Int, uuid: String,
+        sni: String, publicKey: String, shortId: String
+    ): String {
+        val outbound = mapOf<String, Any>(
+            "type" to "vless",
+            "tag" to "proxy",
+            "server" to server,
+            "server_port" to port,
+            "uuid" to uuid,
+            "flow" to "xtls-rprx-vision",
+            "tls" to mapOf(
+                "enabled" to true,
+                "server_name" to sni,
+                "utls" to mapOf("enabled" to true, "fingerprint" to "chrome"),
+                "reality" to mapOf(
+                    "enabled" to true,
+                    "public_key" to publicKey,
+                    "short_id" to shortId
+                )
+            )
+        )
+
+        return buildFullConfig(outbound)
+    }
+
+    private fun buildFullConfig(outbound: Map<String, Any>): String {
+        val config = mapOf<String, Any>(
+            "log" to mapOf("level" to "warn"),
+            "dns" to mapOf(
+                "servers" to listOf(
+                    mapOf("tag" to "google", "type" to "tls", "server" to "8.8.8.8"),
+                    mapOf("tag" to "local", "type" to "udp", "server" to "223.5.5.5")
+                )
+            ),
+            "inbounds" to listOf(
+                mapOf(
+                    "type" to "tun",
+                    "tag" to "tun-in",
+                    "address" to listOf("172.19.0.1/30", "fdfe:dcba:9876::1/126"),
+                    "mtu" to 4160,
+                    "auto_route" to true,
+                    "strict_route" to true
+                )
+            ),
+            "outbounds" to listOf(outbound,
+                mapOf("type" to "direct", "tag" to "direct"),
+                mapOf("type" to "block", "tag" to "block"),
+                mapOf("type" to "dns", "tag" to "dns-out")
+            ),
+            "route" to mapOf(
+                "rules" to listOf(
+                    mapOf("action" to "sniff"),
+                    mapOf("protocol" to listOf("dns"), "action" to "hijack-dns")
+                ),
+                "default_domain_resolver" to "google",
+                "final" to "proxy"
+            )
+        )
+
+        return JSONObject(config).toString()
+    }
+}
+```
+
+#### 注意事项
+
+1. **VpnService 权限**：AndroidManifest.xml 中声明 `<service android:name=".SingboxVpnService" android:permission="android.permission.BIND_VPN_SERVICE">`，并添加 `<intent-filter><action android:name="android.net.VpnService"/></intent-filter>`
+2. **用户授权**：首次连接需调用 `VpnService.prepare(context)` 弹出系统授权对话框
+3. **sing-box AAR**：从 [sing-box 官方](https://github.com/SagerNet/sing-box) 获取 AAR Library，放入 `app/libs/` 目录
+4. **MTU 设置**：Android VpnService.Builder 的 `setMtu()` 对 Hysteria2 建议设为 4160
+5. **前台服务**：Android 8.0+ 需要 Foreground Service 通知栏常驻，确保 VPN 不被系统杀死
+6. **流量上报**：在 VpnService 中启动协程定时上报，App 被杀后 VpnService 仍可运行
+7. **DataStore 存储**：JWT Token 使用 EncryptedDataStore 或 Jetpack Security 存储，不要用 SharedPreferences
+
+---
+
+## 14. 设计决策与权衡
 
 | 决策 | 选择 | 原因 | 权衡 |
 |------|------|------|------|
@@ -2387,7 +3298,24 @@ public function deployToNode($node, $user, $protocol)
 
 ---
 
-## 13. 版本变更记录
+## 15. 版本变更记录
+
+### v1.10.0 (2026-04-30)
+
+**新功能 — Hysteria2 性能优化**：
+
+- 服务端 inbound 添加 `initial_packet_size: 1400`，避免 QUIC 包 IP 分片
+- 服务端 inbound 添加 `masquerade: https://www.bing.com`，伪装为正常网站
+- 服务端/客户端 TLS 添加 `alpn: ["h3"]`，明确 HTTP/3 协商
+- 客户端 TUN MTU 从 9000 降为 4160，避免 QUIC over UDP 的 IP 分片问题
+- 设置带宽时自动启用 `ignore_client_bandwidth`，强制使用 Brutal CC
+- 安装脚本新增 `optimize_system()`：UDP 缓冲区 16MB、BBR 拥塞控制、tcp_fastopen
+- systemd 服务添加 `CPUSchedulingPolicy=rr` 和 `CPUSchedulingPriority=99`
+
+**文档更新**：
+
+- 新增第 12 章「Laravel 控制面板开发指南」：数据库设计、核心服务、心跳监控、流量计费、签名密码机制、定时任务
+- 新增第 13 章「客户端开发指南」：整体架构、连接流程、配置组装、Hysteria2 性能优化、流量监控、iOS/Android 实现要点
 
 ### v1.9.3 (2026-04-30)
 
