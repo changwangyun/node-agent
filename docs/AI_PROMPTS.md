@@ -555,7 +555,7 @@ Laravel 调用此接口将用户的协议配置推送到节点，Node Agent 会�
 
 Node Agent 会主动向 Laravel 发送心跳，Laravel 需要实现接收端点。
 
-**Node Agent 发送：** POST `{control_plane.url}/api/node/heartbeat`
+**Node Agent 发送：** POST `{control_plane.url}{control_plane.heartbeat_path}`（默认路径 `/api/node/heartbeat`，可通过 `heartbeat_path` 配置项修改）
 **请求头：** `X-Node-Token: {control_plane.token}`, `X-Node-ID: {control_plane.node_id}`
 
 **心跳请求体：**

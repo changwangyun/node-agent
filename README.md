@@ -1563,7 +1563,8 @@ Node Agent 内置 CORS 中间件，允许从 Web 页面（如 test.php 测试页
     "url": "http://YOUR-LARAVEL-SERVER:8000",
     "token": "YOUR-CONTROL-PLANE-TOKEN",
     "node_id": "node-001",
-    "timeout": 10
+    "timeout": 10,
+    "heartbeat_path": "/api/node/heartbeat"
   },
   "device_limit": {
     "max_devices": 3,
@@ -1605,6 +1606,7 @@ Node Agent 内置 CORS 中间件，允许从 Web 页面（如 test.php 测试页
 | `token` | string | 空 | 控制面认证 Token |
 | `node_id` | string | `node-001` | 在控制面注册的节点 ID |
 | `timeout` | int | `10` | HTTP 请求超时（秒） |
+| `heartbeat_path` | string | `/api/node/heartbeat` | 心跳上报路径，可按控制面实际路由修改 |
 
 #### device_limit 配置
 
@@ -1740,7 +1742,8 @@ cat > /etc/node-agent/config.json << 'EOF'
     "url": "https://your-laravel-server.com",
     "token": "your-control-plane-token",
     "node_id": "node-hk-001",
-    "timeout": 10
+    "timeout": 10,
+    "heartbeat_path": "/api/node/heartbeat"
   },
   "device_limit": {
     "max_devices": 3,
@@ -2371,6 +2374,22 @@ public function deployToNode($node, $user, $protocol)
 ---
 
 ## 13. 版本变更记录
+
+### v1.8.1 (2026-04-30)
+
+**性能优化**：
+
+- `GetStats()` 单次 Clash API `/connections` 调用同时返回统计数据和在线用户列表，消除重复请求
+- `/status` 和 `/stats` 接口不再单独调用 `GetOnlineUsers()`，预期延迟降低约 50%（~1s → ~500ms）
+- 心跳上报同样复用 `GetStats()` 返回的在线用户数据，不再额外请求
+
+**新功能**：
+
+- `control_plane.heartbeat_path` 配置项：心跳上报路径可配置，默认 `/api/node/heartbeat`，适配不同控制面路由
+
+**修复**：
+
+- 修复心跳上报 404：控制面路由与硬编码路径不一致时，可通过配置项修改
 
 ### v1.8.0 (2026-04-30)
 

@@ -23,9 +23,12 @@ warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
 err()   { echo -e "${RED}[ERROR]${NC} $*"; exit 1; }
 
 banner() {
+    local ver
+    ver=$(detect_latest_version)
     echo ""
     echo -e "${CYAN}╔══════════════════════════════════════════╗${NC}"
     echo -e "${CYAN}║${NC}     Node Agent VPN 节点 - 一键安装      ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}              版本: ${ver}                  ${CYAN}║${NC}"
     echo -e "${CYAN}╚══════════════════════════════════════════╝${NC}"
     echo ""
 }
@@ -347,7 +350,8 @@ install_config() {
     "url": "${cp_url}",
     "token": "${cp_token}",
     "node_id": "${node_id}",
-    "timeout": 10
+    "timeout": 10,
+    "heartbeat_path": "/api/node/heartbeat"
   },
   "device_limit": {
     "max_devices": 3,
@@ -439,14 +443,16 @@ start_service() {
 }
 
 show_result() {
-    local token
+    local token ver
     token=$(grep '"api_token"' "${CONFIG_DIR}/config.json" 2>/dev/null | sed -E 's/.*"api_token":\s*"([^"]+)".*/\1/' || echo "见配置文件")
+    ver=$(${INSTALL_DIR}/${BINARY} -version 2>/dev/null || echo "unknown")
 
     echo ""
     echo -e "${GREEN}╔══════════════════════════════════════════╗${NC}"
     echo -e "${GREEN}║${NC}          ✅ 安装完成！                   ${GREEN}║${NC}"
     echo -e "${GREEN}╚══════════════════════════════════════════╝${NC}"
     echo ""
+    echo -e "  ${CYAN}版本:${NC}        ${ver}"
     echo -e "  ${CYAN}API 地址:${NC}    http://$(hostname -I 2>/dev/null | awk '{print $1}' || echo 'SERVER_IP'):8080"
     echo -e "  ${CYAN}API Token:${NC}   ${token}"
     echo -e "  ${CYAN}配置文件:${NC}    ${CONFIG_DIR}/config.json"

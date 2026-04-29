@@ -21,9 +21,17 @@ import (
 	"node-agent/middleware"
 )
 
+var Version = "dev"
+
 func main() {
 	configPath := flag.String("config", "/etc/node-agent/config.json", "path to config file")
+	showVersion := flag.Bool("version", false, "show version")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Printf("node-agent %s\n", Version)
+		os.Exit(0)
+	}
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {
