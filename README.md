@@ -843,7 +843,7 @@ ReleaseSession(userID)
 #### 上报机制
 
 - 以可配置间隔（默认 10 秒）向 Laravel 控制面发送 HTTP POST 请求
-- 请求路径：`{ControlPlane.URL}/api/node/heartbeat`
+- 请求路径：`{ControlPlane.URL}/api/v1/node/heartbeat`
 - 认证方式：`X-Node-Token` + `X-Node-ID` Header
 - 启动时立即发送一次心跳，之后定时发送
 - 支持优雅停止（通过 `stopCh` channel）

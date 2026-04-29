@@ -131,7 +131,7 @@ func (r *Reporter) sendHeartbeat() {
 
 	heartbeatPath := r.cfg.ControlPlane.HeartbeatPath
 	if heartbeatPath == "" {
-		heartbeatPath = "/api/node/heartbeat"
+		heartbeatPath = "/api/v1/node/heartbeat"
 	}
 	url := fmt.Sprintf("%s%s", r.cfg.GetControlPlaneURL(), heartbeatPath)
 	req, err := http.NewRequest("POST", url, bytes.NewReader(data))

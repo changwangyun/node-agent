@@ -351,7 +351,7 @@ install_config() {
     "token": "${cp_token}",
     "node_id": "${node_id}",
     "timeout": 10,
-    "heartbeat_path": "/api/node/heartbeat"
+    "heartbeat_path": "/api/v1/node/heartbeat"
   },
   "device_limit": {
     "max_devices": 3,

@@ -555,7 +555,7 @@ Laravel 调用此接口将用户的协议配置推送到节点，Node Agent 会�
 
 Node Agent 会主动向 Laravel 发送心跳，Laravel 需要实现接收端点。
 
-**Node Agent 发送：** POST `{control_plane.url}{control_plane.heartbeat_path}`（默认路径 `/api/node/heartbeat`，可通过 `heartbeat_path` 配置项修改）
+**Node Agent 发送：** POST `{control_plane.url}{control_plane.heartbeat_path}`（默认路径 `/api/v1/node/heartbeat`，可通过 `heartbeat_path` 配置项修改）
 **请求头：** `X-Node-Token: {control_plane.token}`, `X-Node-ID: {control_plane.node_id}`
 
 **心跳请求体：**
@@ -937,16 +937,16 @@ POST   /api/v1/auth/logout
 GET    /api/v1/user
 PUT    /api/v1/user
 POST   /api/v1/user/change-password
-GET    /api/v1/nodes                返回可用节点+协议参数+签名密码
-GET    /api/v1/nodes/recommended    智能推荐3个最优节点
-POST   /api/v1/connection/connect   { node_id, protocol_type }
-POST   /api/v1/connection/disconnect { node_id, upload, download, duration }
-POST   /api/v1/traffic/report       { node_id, upload, download }
-GET    /api/v1/traffic/summary
-GET    /api/v1/plans
-GET    /api/v1/subscription
-GET    /api/v1/devices
-DELETE /api/v1/devices/{id}
+GET    /api/nodes                返回可用节点+协议参数+签名密码
+GET    /api/nodes/recommended    智能推荐3个最优节点
+POST   /api/connection/connect   { node_id, protocol_type }
+POST   /api/connection/disconnect { node_id, upload, download, duration }
+POST   /api/traffic/report       { node_id, upload, download }
+GET    /api/traffic/summary
+GET    /api/plans
+GET    /api/subscription
+GET    /api/devices
+DELETE /api/devices/{id}
 
 # 管理后台 (Inertia pages)
 GET    /admin/dashboard
