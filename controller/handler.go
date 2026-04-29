@@ -124,10 +124,16 @@ func (h *Handler) Status(w http.ResponseWriter, r *http.Request) {
 	var activeConns int
 	var trafficData stats.TrafficData
 	var speedData stats.SpeedData
+	var onlineDetails []*stats.OnlineUser
+	var onlineUserCount int
 	if statsResult != nil {
 		activeConns = statsResult.Connections.ActiveConnections
 		trafficData = statsResult.Traffic
 		speedData = statsResult.Speed
+		if len(statsResult.OnlineUsers) > 0 {
+			onlineDetails = statsResult.OnlineUsers
+			onlineUserCount = len(statsResult.OnlineUsers)
+		}
 	}
 
 	nodeInfo := map[string]interface{}{
@@ -173,13 +179,9 @@ func (h *Handler) Status(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	if sc, ok := h.collector.(*stats.SingBoxStatsCollector); ok {
-		if onlineUsers, err := sc.GetOnlineUsers(); err == nil {
-			response["online_details"] = onlineUsers
-			if len(onlineUsers) > 0 {
-				response["devices"].(map[string]interface{})["online_users"] = len(onlineUsers)
-			}
-		}
+	if onlineUserCount > 0 {
+		response["online_details"] = onlineDetails
+		response["devices"].(map[string]interface{})["online_users"] = onlineUserCount
 	}
 
 	writeJSON(w, http.StatusOK, response)
@@ -206,11 +208,9 @@ func (h *Handler) GetStats(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	if sc, ok := h.collector.(*stats.SingBoxStatsCollector); ok {
-		if onlineUsers, err := sc.GetOnlineUsers(); err == nil {
-			response["online_users"] = len(onlineUsers)
-			response["online_details"] = onlineUsers
-		}
+	if len(result.OnlineUsers) > 0 {
+		response["online_users"] = len(result.OnlineUsers)
+		response["online_details"] = result.OnlineUsers
 	}
 
 	if h.v2rayStats != nil && h.v2rayStats.IsEnabled() {

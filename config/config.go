@@ -42,10 +42,11 @@ type SingBoxConfig struct {
 }
 
 type ControlPlaneConfig struct {
-	URL     string `json:"url"`
-	Token   string `json:"token"`
-	NodeID  string `json:"node_id"`
-	Timeout int    `json:"timeout"`
+	URL           string `json:"url"`
+	Token         string `json:"token"`
+	NodeID        string `json:"node_id"`
+	Timeout       int    `json:"timeout"`
+	HeartbeatPath string `json:"heartbeat_path,omitempty"`
 }
 
 type DeviceLimitConfig struct {

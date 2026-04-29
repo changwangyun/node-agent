@@ -36,6 +36,7 @@ type StatsResult struct {
 	Traffic     TrafficData    `json:"traffic"`
 	Speed       SpeedData      `json:"speed"`
 	Connections ConnectionData `json:"connections"`
+	OnlineUsers []*OnlineUser  `json:"online_users,omitempty"`
 }
 
 type Collector interface {
@@ -191,19 +192,9 @@ func (s *SingBoxStatsCollector) GetConnections() (*ConnectionData, error) {
 	}, nil
 }
 
-func (s *SingBoxStatsCollector) GetOnlineUsers() ([]*OnlineUser, error) {
-	body, err := s.doRequest("/connections")
-	if err != nil {
-		return nil, fmt.Errorf("request clash api: %w", err)
-	}
-
-	var connResp clashConnectionsResponse
-	if err := json.Unmarshal(body, &connResp); err != nil {
-		return nil, fmt.Errorf("parse response: %w", err)
-	}
-
+func extractOnlineUsers(connections []clashConnectionDetail) []*OnlineUser {
 	userMap := make(map[string]*OnlineUser)
-	for _, conn := range connResp.Connections {
+	for _, conn := range connections {
 		userID := conn.Metadata.InboundUser
 		if userID == "" {
 			continue
@@ -221,12 +212,25 @@ func (s *SingBoxStatsCollector) GetOnlineUsers() ([]*OnlineUser, error) {
 			}
 		}
 	}
-
 	result := make([]*OnlineUser, 0, len(userMap))
 	for _, u := range userMap {
 		result = append(result, u)
 	}
-	return result, nil
+	return result
+}
+
+func (s *SingBoxStatsCollector) GetOnlineUsers() ([]*OnlineUser, error) {
+	body, err := s.doRequest("/connections")
+	if err != nil {
+		return nil, fmt.Errorf("request clash api: %w", err)
+	}
+
+	var connResp clashConnectionsResponse
+	if err := json.Unmarshal(body, &connResp); err != nil {
+		return nil, fmt.Errorf("parse response: %w", err)
+	}
+
+	return extractOnlineUsers(connResp.Connections), nil
 }
 
 func (s *SingBoxStatsCollector) GetStats() (*StatsResult, error) {
@@ -268,6 +272,8 @@ func (s *SingBoxStatsCollector) GetStats() (*StatsResult, error) {
 		ActiveConnections: len(connResp.Connections),
 	}
 
+	onlineUsers := extractOnlineUsers(connResp.Connections)
+
 	s.mu.Unlock()
 
 	speed, _ := s.GetSpeed()
@@ -276,6 +282,7 @@ func (s *SingBoxStatsCollector) GetStats() (*StatsResult, error) {
 		Traffic:     traffic,
 		Speed:       *speed,
 		Connections: connections,
+		OnlineUsers: onlineUsers,
 	}, nil
 }
 

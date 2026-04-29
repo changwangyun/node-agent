@@ -129,7 +129,11 @@ func (r *Reporter) sendHeartbeat() {
 		return
 	}
 
-	url := fmt.Sprintf("%s/api/node/heartbeat", r.cfg.GetControlPlaneURL())
+	heartbeatPath := r.cfg.ControlPlane.HeartbeatPath
+	if heartbeatPath == "" {
+		heartbeatPath = "/api/node/heartbeat"
+	}
+	url := fmt.Sprintf("%s%s", r.cfg.GetControlPlaneURL(), heartbeatPath)
 	req, err := http.NewRequest("POST", url, bytes.NewReader(data))
 	if err != nil {
 		log.Printf("[heartbeat] create request error: %v", err)
@@ -159,11 +163,15 @@ func (r *Reporter) buildPayload() *HeartbeatPayload {
 	pid := r.mgr.GetPID()
 
 	var trafficReport TrafficReport
+	var onlineUserCount int
 	statsResult, err := r.collector.GetStats()
 	if err == nil && statsResult != nil {
 		trafficReport = TrafficReport{
 			Upload:   statsResult.Traffic.Upload,
 			Download: statsResult.Traffic.Download,
+		}
+		if len(statsResult.OnlineUsers) > 0 {
+			onlineUserCount = len(statsResult.OnlineUsers)
 		}
 	}
 
@@ -173,10 +181,8 @@ func (r *Reporter) buildPayload() *HeartbeatPayload {
 		ActiveSessions: r.limiter.GetOnlineUserCount(),
 	}
 
-	if mc, ok := r.collector.(*stats.MultiCollector); ok {
-		if onlineUsers, err := mc.GetOnlineUsers(); err == nil && len(onlineUsers) > 0 {
-			onlineReport.UserCount = len(onlineUsers)
-		}
+	if onlineUserCount > 0 {
+		onlineReport.UserCount = onlineUserCount
 	}
 
 	cpuPercent, _ := utils.GetCPUUsage()
