@@ -39,22 +39,18 @@ func NewV2RayStatsCollector(addr string) *V2RayStatsCollector {
 }
 
 func (v *V2RayStatsCollector) tryConnect() {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-
-	conn, err := grpc.DialContext(ctx, v.addr,
+	conn, err := grpc.Dial(v.addr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithBlock(),
 	)
 	if err != nil {
 		v.enabled = false
-		log.Printf("[v2ray-stats] connect to %s failed: %v", v.addr, err)
+		log.Printf("[v2ray-stats] dial %s failed: %v", v.addr, err)
 		return
 	}
 	v.conn = conn
 	v.client = statsServiceGRPC.NewStatsServiceClient(conn)
 	v.enabled = true
-	log.Printf("[v2ray-stats] connected to %s", v.addr)
+	log.Printf("[v2ray-stats] dial %s succeeded (lazy connect)", v.addr)
 }
 
 func (v *V2RayStatsCollector) IsEnabled() bool {
@@ -99,6 +95,7 @@ func (v *V2RayStatsCollector) refresh() error {
 	if !v.enabled {
 		if v.conn != nil {
 			v.conn.Close()
+			v.conn = nil
 		}
 		v.tryConnect()
 		if !v.enabled {
@@ -116,7 +113,9 @@ func (v *V2RayStatsCollector) refresh() error {
 		v.enabled = false
 		if v.conn != nil {
 			v.conn.Close()
+			v.conn = nil
 		}
+		log.Printf("[v2ray-stats] query failed: %v, will retry on next call", err)
 		return fmt.Errorf("query v2ray stats: %w", err)
 	}
 
