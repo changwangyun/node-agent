@@ -366,6 +366,7 @@ Watchdog 以可配置间隔（默认 5 秒）检测 sing-box 状态，发现崩�
 - 支持 Reality 协议的密钥对和握手配置
 - 原子写入配置文件（先写 `.tmp` 再 `rename`）
 - 管理多用户部署记录
+- **多用户合并**：同一协议+端口的多个用户自动合并到同一个 inbound 的 users 列表中，支持多次 Deploy 追加用户而不覆盖
 
 #### DeployRequest 结构
 
@@ -421,26 +422,32 @@ type ClientConfigResult struct {
 
 Deploy 时生成**服务端** sing-box 配置，核心流程：
 
-1. **确定 TLS 证书来源**：
+1. **记录用户部署信息**：将 DeployRequest 存入 `deploys` 映射表
+
+2. **重建完整配置**：遍历所有已部署用户，按协议+端口分组，将同一协议+端口的用户合并到同一个 inbound 的 `users` 列表中
+
+3. **确定 TLS 证书来源**：
    - Reality 协议：不需要 TLS 证书
    - 指定了 ACME 域名：使用 ACME 自动签发
    - 指定了证书路径：使用自定义证书
    - 均未指定：自动生成自签名证书（ECDSA P256，有效期 10 年）
 
-2. **生成服务端入站配置（inbound）**：
-   - Hysteria2：`type: "hysteria2"`，含 users、TLS、obfs、带宽限制
-   - VLESS：`type: "vless"`，含 users（UUID + flow）、TLS
+4. **生成服务端入站配置（inbound）**：
+   - Hysteria2：`type: "hysteria2"`，含 users（name + password）、TLS、obfs、带宽限制
+   - VLESS：`type: "vless"`，含 users（name + UUID + flow）、TLS
    - Reality：`type: "vless"`，含 Reality TLS（private_key、short_id、handshake）
 
-3. **生成客户端出站配置（outbound）**：
+5. **生成客户端出站配置（outbound）**：
    - 根据协议生成对应的客户端出站配置
    - 自动从 Reality 私钥推导公钥
    - 自签名证书时标记 `insecure: true`
 
-4. **生成客户端 URI**：
+6. **生成客户端 URI**：
    - Hysteria2：`hysteria2://password@server:port?sni=xxx`
    - VLESS：`vless://uuid@server:port?security=tls&sni=xxx`
    - Reality：`vless://uuid@server:port?security=reality&pbk=xxx&sid=xxx`
+
+> **多用户合并机制**：每次 Deploy 不会覆盖已有用户配置，而是将新用户追加到对应 inbound 的 users 列表中。例如先部署 user-001（hysteria2, port 443），再部署 user-002（hysteria2, port 443），最终生成的 inbound 会包含 `users: [{name: "user-001", password: "..."}, {name: "user-002", password: "..."}]`。RemoveDeploy 删除用户后也会重新构建配置。
 
 #### 协议服务端配置映射
 
@@ -452,7 +459,7 @@ Deploy 时生成**服务端** sing-box 配置，核心流程：
   "tag": "hysteria2-in",
   "listen": "0.0.0.0",
   "listen_port": 443,
-  "users": [{"password": "user_password"}],
+  "users": [{"name": "user-001", "password": "user_password"}],
   "tls": {
     "enabled": true,
     "server_name": "example.com",
@@ -473,7 +480,7 @@ Deploy 时生成**服务端** sing-box 配置，核心流程：
   "tag": "vless-in",
   "listen": "0.0.0.0",
   "listen_port": 443,
-  "users": [{"uuid": "user_uuid", "flow": "xtls-rprx-vision"}],
+  "users": [{"name": "user-001", "uuid": "user_uuid", "flow": "xtls-rprx-vision"}],
   "tls": {
     "enabled": true,
     "server_name": "example.com",
@@ -491,7 +498,7 @@ Deploy 时生成**服务端** sing-box 配置，核心流程：
   "tag": "reality-in",
   "listen": "0.0.0.0",
   "listen_port": 443,
-  "users": [{"uuid": "user_uuid", "flow": "xtls-rprx-vision"}],
+  "users": [{"name": "user-001", "uuid": "user_uuid", "flow": "xtls-rprx-vision"}],
   "tls": {
     "enabled": true,
     "server_name": "www.microsoft.com",
@@ -817,7 +824,7 @@ ReleaseSession(userID)
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `user_count` | int | 在线用户数 |
+| `user_count` | int | 在线用户数（优先从 Clash API `/connections` 获取，不可用时回退到 DeviceLimiter 计数） |
 | `device_count` | int | 总设备数 |
 | `active_sessions` | int | 活跃会话数 |
 
@@ -2364,6 +2371,23 @@ public function deployToNode($node, $user, $protocol)
 ---
 
 ## 13. 版本变更记录
+
+### v1.8.0 (2026-04-30)
+
+**重大变更**：
+
+- 配置生成支持**多用户合并**：同一协议+端口的多个用户自动合并到同一个 inbound 的 users 列表中，多次 Deploy 不再覆盖已有用户配置
+- `RemoveDeploy` 删除用户后自动重新构建配置，确保其他用户不受影响
+- 心跳上报的 `user_count` 优先从 Clash API `/connections` 获取真实在线用户数，不可用时回退到 DeviceLimiter 计数
+
+**新功能**：
+
+- `MultiCollector` 新增 `GetOnlineUsers()` 方法，委托给内部 `SingBoxStatsCollector`
+
+**修复**：
+
+- 修复多次 Deploy 导致之前用户配置被覆盖，Clash API 无法识别在线用户的问题
+- 修复心跳上报在线用户数始终为 0（当控制面未调用 `/device/register` 时）的问题
 
 ### v1.7.0 (2026-04-28)
 

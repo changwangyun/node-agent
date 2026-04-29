@@ -234,12 +234,13 @@ func (g *Generator) GenerateAndWrite(req *DeployRequest) (*ClientConfigResult, e
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
-	cfg, clientCfg, err := g.generate(req)
+	g.deploys[req.UserID] = req
+
+	cfg, clientCfg, err := g.rebuildConfig()
 	if err != nil {
 		return nil, fmt.Errorf("generate config: %w", err)
 	}
 
-	g.deploys[req.UserID] = req
 	g.current = cfg
 
 	if err := g.writeConfig(cfg); err != nil {
@@ -263,6 +264,135 @@ func (g *Generator) GetClientConfig(userID string) (*ClientConfigResult, error) 
 		return nil, err
 	}
 	return clientCfg, nil
+}
+
+func (g *Generator) rebuildConfig() (*SingBoxConfig, *ClientConfigResult, error) {
+	if len(g.deploys) == 0 {
+		defaultCfg := g.generateDefault()
+		return defaultCfg, nil, nil
+	}
+
+	cfg := &SingBoxConfig{
+		Log: &LogConfig{
+			Level:     "info",
+			Timestamp: true,
+		},
+		DNS: &DNSConfig{
+			Servers: []DNSServer{
+				{Tag: "google", Type: "tls", Server: "8.8.8.8"},
+				{Tag: "local", Type: "udp", Server: "223.5.5.5"},
+			},
+		},
+		Stats: &StatsConfig{
+			ClashAPI: &ClashAPIConfig{
+				ExternalController: g.clashAPIAddr,
+				Secret:             g.clashAPISecret,
+			},
+			V2RayAPI: &V2RayAPIConfig{
+				Listen: g.v2rayAPIAddr,
+				Stats: &V2RayAPIStats{
+					Enabled:   true,
+					Outbounds: []string{"direct"},
+				},
+			},
+		},
+		Route: &RouteConfig{
+			Rules: []RouteRule{
+				{Action: "sniff"},
+				{Protocol: []string{"dns"}, Action: "hijack-dns"},
+			},
+			DefaultDomainResolver: "google",
+			Final:                 "direct",
+		},
+	}
+
+	cfg.Outbounds = append(cfg.Outbounds, Outbound{
+		Type: "direct",
+		Tag:  "direct",
+	})
+
+	type inboundKey struct {
+		protocol string
+		port     int
+	}
+	inboundGroups := make(map[inboundKey][]*DeployRequest)
+
+	var lastReq *DeployRequest
+	for _, req := range g.deploys {
+		key := inboundKey{protocol: req.Protocol, port: req.Port}
+		inboundGroups[key] = append(inboundGroups[key], req)
+		lastReq = req
+	}
+
+	for _, reqs := range inboundGroups {
+		firstReq := reqs[0]
+
+		sni := firstReq.SNI
+		if sni == "" {
+			sni = firstReq.Server
+		}
+
+		certPath := firstReq.TLSCertPath
+		keyPath := firstReq.TLSKeyPath
+		useACME := firstReq.ACMEDomain != ""
+
+		if firstReq.Protocol != "reality" && !useACME && (certPath == "" || keyPath == "") {
+			dir := filepath.Dir(g.cfgPath)
+			certPath = filepath.Join(dir, "self-signed-cert.pem")
+			keyPath = filepath.Join(dir, "self-signed-key.pem")
+			if err := GenerateSelfSignedCert(certPath, keyPath, sni); err != nil {
+				return nil, nil, fmt.Errorf("generate self-signed cert: %w", err)
+			}
+		}
+
+		inbound, err := g.generateInbound(firstReq, certPath, keyPath, useACME)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		if len(reqs) > 1 {
+			existingUsers := make(map[string]bool)
+			for _, u := range inbound.Users {
+				existingUsers[u.Name] = true
+			}
+			for _, req := range reqs[1:] {
+				if !existingUsers[req.UserID] {
+					switch req.Protocol {
+					case "hysteria2":
+						inbound.Users = append(inbound.Users, InboundUser{
+							Name:     req.UserID,
+							Password: req.Password,
+						})
+					case "vless", "reality":
+						uuid := req.UUID
+						if uuid == "" {
+							uuid = req.Password
+						}
+						inbound.Users = append(inbound.Users, InboundUser{
+							Name: req.UserID,
+							UUID: uuid,
+							Flow: "xtls-rprx-vision",
+						})
+					}
+					existingUsers[req.UserID] = true
+				}
+			}
+		}
+
+		cfg.Inbounds = append(cfg.Inbounds, *inbound)
+	}
+
+	var lastClientCfg *ClientConfigResult
+	if lastReq != nil {
+		useSelfSigned := lastReq.Protocol != "reality" && lastReq.ACMEDomain == "" && (lastReq.TLSCertPath == "" || lastReq.TLSKeyPath == "")
+		clientCfg, err := g.buildClientConfig(lastReq, useSelfSigned)
+		if err != nil {
+			return nil, nil, fmt.Errorf("build client config: %w", err)
+		}
+		lastClientCfg = clientCfg
+	}
+
+	return cfg, lastClientCfg, nil
 }
 
 func (g *Generator) generate(req *DeployRequest) (*SingBoxConfig, *ClientConfigResult, error) {
@@ -775,7 +905,12 @@ func (g *Generator) RemoveDeploy(userID string) error {
 		return g.writeConfig(defaultCfg)
 	}
 
-	return nil
+	cfg, _, err := g.rebuildConfig()
+	if err != nil {
+		return fmt.Errorf("rebuild config after remove: %w", err)
+	}
+	g.current = cfg
+	return g.writeConfig(cfg)
 }
 
 func (g *Generator) generateDefault() *SingBoxConfig {

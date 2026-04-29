@@ -369,3 +369,10 @@ func (m *MultiCollector) GetStats() (*StatsResult, error) {
 	}
 	return data, nil
 }
+
+func (m *MultiCollector) GetOnlineUsers() ([]*OnlineUser, error) {
+	if sc, ok := m.primary.(*SingBoxStatsCollector); ok {
+		return sc.GetOnlineUsers()
+	}
+	return nil, fmt.Errorf("primary collector does not support GetOnlineUsers")
+}

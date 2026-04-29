@@ -17,12 +17,12 @@ import (
 )
 
 type HeartbeatPayload struct {
-	NodeID    string              `json:"node_id"`
-	Timestamp int64               `json:"timestamp"`
-	Status    NodeStatus          `json:"status"`
-	Traffic   TrafficReport       `json:"traffic"`
-	Online    OnlineReport        `json:"online"`
-	System    SystemReport        `json:"system"`
+	NodeID    string        `json:"node_id"`
+	Timestamp int64         `json:"timestamp"`
+	Status    NodeStatus    `json:"status"`
+	Traffic   TrafficReport `json:"traffic"`
+	Online    OnlineReport  `json:"online"`
+	System    SystemReport  `json:"system"`
 }
 
 type NodeStatus struct {
@@ -56,14 +56,14 @@ type SystemReport struct {
 }
 
 type Reporter struct {
-	mu       sync.RWMutex
-	cfg      *config.Config
-	mgr      *singbox.Manager
+	mu        sync.RWMutex
+	cfg       *config.Config
+	mgr       *singbox.Manager
 	collector stats.Collector
-	limiter  *device.DeviceLimiter
-	client   *http.Client
-	stopCh   chan struct{}
-	running  bool
+	limiter   *device.DeviceLimiter
+	client    *http.Client
+	stopCh    chan struct{}
+	running   bool
 }
 
 func NewReporter(
@@ -171,6 +171,12 @@ func (r *Reporter) buildPayload() *HeartbeatPayload {
 		UserCount:      r.limiter.GetOnlineUserCount(),
 		DeviceCount:    r.limiter.GetTotalDeviceCount(),
 		ActiveSessions: r.limiter.GetOnlineUserCount(),
+	}
+
+	if mc, ok := r.collector.(*stats.MultiCollector); ok {
+		if onlineUsers, err := mc.GetOnlineUsers(); err == nil && len(onlineUsers) > 0 {
+			onlineReport.UserCount = len(onlineUsers)
+		}
 	}
 
 	cpuPercent, _ := utils.GetCPUUsage()
