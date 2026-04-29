@@ -3,6 +3,7 @@ package stats
 import (
 	"context"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
@@ -47,11 +48,13 @@ func (v *V2RayStatsCollector) tryConnect() {
 	)
 	if err != nil {
 		v.enabled = false
+		log.Printf("[v2ray-stats] connect to %s failed: %v", v.addr, err)
 		return
 	}
 	v.conn = conn
 	v.client = statsServiceGRPC.NewStatsServiceClient(conn)
 	v.enabled = true
+	log.Printf("[v2ray-stats] connected to %s", v.addr)
 }
 
 func (v *V2RayStatsCollector) IsEnabled() bool {

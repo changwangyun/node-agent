@@ -376,7 +376,7 @@ func (h *Handler) GetLogs(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) GetUserTraffic(w http.ResponseWriter, r *http.Request) {
-	if h.v2rayStats == nil || !h.v2rayStats.IsEnabled() {
+	if h.v2rayStats == nil {
 		writeError(w, http.StatusServiceUnavailable, "v2ray api not available: sing-box needs to be built with -tags with_v2ray_api")
 		return
 	}
