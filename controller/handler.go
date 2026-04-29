@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"node-agent/core/configgen"
 	"node-agent/core/device"
@@ -397,9 +398,15 @@ func (h *Handler) GetUserTraffic(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "query all user traffic failed: "+err.Error())
 		return
 	}
+	var users []*stats.UserTraffic
+	for _, ut := range all {
+		if !strings.HasPrefix(ut.UserID, "outbound:") {
+			users = append(users, ut)
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"users": all,
-		"count": len(all),
+		"users": users,
+		"count": len(users),
 	})
 }
 

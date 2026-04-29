@@ -459,7 +459,13 @@ func (m *MultiCollector) getOnlineUsersFromV2Ray() ([]*OnlineUser, error) {
 		conns := sc.getActiveConnections()
 		for _, conn := range conns {
 			if conn.Metadata.InboundUser == "" && conn.Metadata.SourceIP != "" {
-				fallbackInbound = conn.Metadata.Inbound
+				inboundTag := conn.Metadata.Inbound
+				if inboundTag == "" {
+					inboundTag = extractInboundFromType(conn.Metadata.Type)
+				}
+				if fallbackInbound == "" && inboundTag != "" {
+					fallbackInbound = inboundTag
+				}
 				fallbackIPs = append(fallbackIPs, conn.Metadata.SourceIP)
 			}
 		}
@@ -512,4 +518,12 @@ func (m *MultiCollector) getOnlineUsersFromV2Ray() ([]*OnlineUser, error) {
 	m.lastTraffic = newSnapshot
 
 	return result, nil
+}
+
+func extractInboundFromType(metadataType string) string {
+	parts := strings.Split(metadataType, "/")
+	if len(parts) >= 2 {
+		return parts[len(parts)-1]
+	}
+	return ""
 }
