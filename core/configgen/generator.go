@@ -77,21 +77,26 @@ type DNSServer struct {
 }
 
 type Inbound struct {
-	Type        string           `json:"type"`
-	Tag         string           `json:"tag,omitempty"`
-	Listen      string           `json:"listen,omitempty"`
-	ListenPort  int              `json:"listen_port,omitempty"`
-	Users       []InboundUser    `json:"users,omitempty"`
-	TLS         *InboundTLS      `json:"tls,omitempty"`
-	Transport   *TransportConfig `json:"transport,omitempty"`
-	Obfs        *ObfsConfig      `json:"obfs,omitempty"`
-	Multiplex   *MultiplexConfig `json:"multiplex,omitempty"`
-	UpMbps      int              `json:"up_mbps,omitempty"`
-	DownMbps    int              `json:"down_mbps,omitempty"`
-	Address     []string         `json:"address,omitempty"`
-	MTU         int              `json:"mtu,omitempty"`
-	AutoRoute   bool             `json:"auto_route,omitempty"`
-	StrictRoute bool             `json:"strict_route,omitempty"`
+	Type                  string           `json:"type"`
+	Tag                   string           `json:"tag,omitempty"`
+	Listen                string           `json:"listen,omitempty"`
+	ListenPort            int              `json:"listen_port,omitempty"`
+	Users                 []InboundUser    `json:"users,omitempty"`
+	TLS                   *InboundTLS      `json:"tls,omitempty"`
+	Transport             *TransportConfig `json:"transport,omitempty"`
+	Obfs                  *ObfsConfig      `json:"obfs,omitempty"`
+	Multiplex             *MultiplexConfig `json:"multiplex,omitempty"`
+	UpMbps                int              `json:"up_mbps,omitempty"`
+	DownMbps              int              `json:"down_mbps,omitempty"`
+	IgnoreClientBandwidth bool             `json:"ignore_client_bandwidth,omitempty"`
+	Masquerade            string           `json:"masquerade,omitempty"`
+	BBRProfile            string           `json:"bbr_profile,omitempty"`
+	InitialPacketSize     int              `json:"initial_packet_size,omitempty"`
+	DisablePathMTUDisc    bool             `json:"disable_path_mtu_discovery,omitempty"`
+	Address               []string         `json:"address,omitempty"`
+	MTU                   int              `json:"mtu,omitempty"`
+	AutoRoute             bool             `json:"auto_route,omitempty"`
+	StrictRoute           bool             `json:"strict_route,omitempty"`
 }
 
 type InboundUser struct {
@@ -106,6 +111,7 @@ type InboundTLS struct {
 	ServerName      string      `json:"server_name,omitempty"`
 	CertificatePath string      `json:"certificate_path,omitempty"`
 	KeyPath         string      `json:"key_path,omitempty"`
+	ALPN            []string    `json:"alpn,omitempty"`
 	ACME            *ACMEConfig `json:"acme,omitempty"`
 	Reality         *Reality    `json:"reality,omitempty"`
 }
@@ -144,6 +150,8 @@ type Outbound struct {
 	Password   string           `json:"password,omitempty"`
 	UUID       string           `json:"uuid,omitempty"`
 	Flow       string           `json:"flow,omitempty"`
+	UpMbps     int              `json:"up_mbps,omitempty"`
+	DownMbps   int              `json:"down_mbps,omitempty"`
 	TLS        *OutboundTLS     `json:"tls,omitempty"`
 	Transport  *TransportConfig `json:"transport,omitempty"`
 	Obfs       *ObfsConfig      `json:"obfs,omitempty"`
@@ -154,6 +162,7 @@ type OutboundTLS struct {
 	Enabled    bool             `json:"enabled"`
 	ServerName string           `json:"server_name,omitempty"`
 	Insecure   bool             `json:"insecure,omitempty"`
+	ALPN       []string         `json:"alpn,omitempty"`
 	Reality    *OutboundReality `json:"reality,omitempty"`
 }
 
@@ -523,17 +532,14 @@ func (g *Generator) generateHysteria2Inbound(req *DeployRequest, certPath, keyPa
 	}
 
 	inbound := &Inbound{
-		Type:       "hysteria2",
-		Tag:        "hysteria2-in",
-		Listen:     "0.0.0.0",
-		ListenPort: req.Port,
-		Users: []InboundUser{
-			{Name: req.UserID, Password: req.Password},
-		},
-		TLS: &InboundTLS{
-			Enabled:    true,
-			ServerName: sni,
-		},
+		Type:              "hysteria2",
+		Tag:               "hysteria2-in",
+		Listen:            "0.0.0.0",
+		ListenPort:        req.Port,
+		Users:             []InboundUser{{Name: req.UserID, Password: req.Password}},
+		InitialPacketSize: 1400,
+		Masquerade:        "https://www.bing.com",
+		TLS:               &InboundTLS{Enabled: true, ServerName: sni, ALPN: []string{"h3"}},
 	}
 
 	if useACME && req.ACMEDomain != "" {
@@ -556,6 +562,7 @@ func (g *Generator) generateHysteria2Inbound(req *DeployRequest, certPath, keyPa
 	if req.UpMbps > 0 || req.DownMbps > 0 {
 		inbound.UpMbps = req.UpMbps
 		inbound.DownMbps = req.DownMbps
+		inbound.IgnoreClientBandwidth = true
 	}
 
 	return inbound, nil
@@ -681,7 +688,14 @@ func (g *Generator) buildClientConfig(req *DeployRequest, insecure bool) (*Clien
 				Enabled:    true,
 				ServerName: sni,
 				Insecure:   insecure,
+				ALPN:       []string{"h3"},
 			},
+		}
+		if req.UpMbps > 0 {
+			clientOutbound.UpMbps = req.UpMbps
+		}
+		if req.DownMbps > 0 {
+			clientOutbound.DownMbps = req.DownMbps
 		}
 		if req.ObfsType != "" {
 			clientOutbound.Obfs = &ObfsConfig{
@@ -760,7 +774,7 @@ func (g *Generator) buildClientConfig(req *DeployRequest, insecure bool) (*Clien
 				Type:        "tun",
 				Tag:         "tun-in",
 				Address:     []string{"172.19.0.1/30"},
-				MTU:         9000,
+				MTU:         4160,
 				AutoRoute:   true,
 				StrictRoute: true,
 			},

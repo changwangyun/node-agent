@@ -388,6 +388,9 @@ Restart=on-failure
 RestartSec=5
 LimitNOFILE=65535
 
+CPUSchedulingPolicy=rr
+CPUSchedulingPriority=99
+
 WorkingDirectory=/var/lib/node-agent
 
 Environment=HOME=/var/lib/node-agent
@@ -414,6 +417,62 @@ EOF
     systemctl daemon-reload
     systemctl enable ${BINARY}
     ok "systemd 服务已安装并启用"
+}
+
+optimize_system() {
+    info "优化系统网络参数..."
+
+    local sysctl_file="/etc/sysctl.d/99-node-agent.conf"
+    local changed=false
+
+    if ! grep -q "net.core.rmem_max" "$sysctl_file" 2>/dev/null || \
+       ! grep -q "16777216" "$sysctl_file" 2>/dev/null; then
+        cat > "$sysctl_file" << 'SYSCTL'
+# Node Agent - Hysteria2/QUIC Performance Optimization
+net.core.rmem_max=16777216
+net.core.wmem_max=16777216
+net.core.rmem_default=16777216
+net.core.wmem_default=16777216
+net.core.netdev_max_backlog=65536
+net.ipv4.udp_mem=65536 131072 262144
+net.ipv4.udp_rmem_min=16384
+net.ipv4.udp_wmem_min=16384
+net.core.somaxconn=65535
+net.ipv4.tcp_fastopen=3
+SYSCTL
+        changed=true
+    fi
+
+    if [ "$changed" = true ]; then
+        sysctl -p "$sysctl_file" 2>/dev/null || true
+        ok "UDP 缓冲区已优化 (16MB)"
+    else
+        info "系统网络参数已优化，跳过"
+    fi
+
+    if [ -f /proc/sys/net/ipv4/tcp_congestion_control ]; then
+        local cc
+        cc=$(cat /proc/sys/net/ipv4/tcp_congestion_control 2>/dev/null || echo "")
+        if [ "$cc" != "bbr" ]; then
+            if modprobe tcp_bbr 2>/dev/null; then
+                if ! grep -q "tcp_bbr" /etc/modules-load.d/node-agent.conf 2>/dev/null; then
+                    echo "tcp_bbr" > /etc/modules-load.d/node-agent.conf
+                fi
+                if ! grep -q "tcp_congestion_control" "$sysctl_file" 2>/dev/null; then
+                    cat >> "$sysctl_file" << 'BBR'
+net.ipv4.tcp_congestion_control=bbr
+net.core.default_qdisc=fq
+BBR
+                    sysctl -p "$sysctl_file" 2>/dev/null || true
+                fi
+                ok "BBR 拥塞控制已启用"
+            else
+                warn "无法加载 tcp_bbr 模块，跳过 BBR 优化"
+            fi
+        else
+            info "BBR 已启用，跳过"
+        fi
+    fi
 }
 
 configure_firewall() {
@@ -520,11 +579,15 @@ do_install() {
     install_config
 
     echo ""
-    info "===== 步骤 5/6: 安装服务 ====="
+    info "===== 步骤 5/7: 安装服务 ====="
     install_service
 
     echo ""
-    info "===== 步骤 6/6: 配置防火墙 & 启动 ====="
+    info "===== 步骤 6/7: 优化系统网络 ====="
+    optimize_system
+
+    echo ""
+    info "===== 步骤 7/7: 配置防火墙 & 启动 ====="
     configure_firewall
     start_service
 
