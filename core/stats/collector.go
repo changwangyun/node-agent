@@ -430,18 +430,42 @@ func (m *MultiCollector) GetStats() (*StatsResult, error) {
 }
 
 func (m *MultiCollector) GetOnlineUsers() ([]*OnlineUser, error) {
+	var clashUsers []*OnlineUser
 	if sc, ok := m.primary.(*SingBoxStatsCollector); ok {
-		users, err := sc.GetOnlineUsers()
-		if err == nil && len(users) > 0 {
-			return users, nil
+		if users, err := sc.GetOnlineUsers(); err == nil {
+			clashUsers = users
 		}
 	}
 
-	if m.v2rayStats != nil {
-		return m.getOnlineUsersFromV2Ray()
+	if m.v2rayStats == nil {
+		if len(clashUsers) > 0 {
+			return clashUsers, nil
+		}
+		return nil, fmt.Errorf("no online user source available")
 	}
 
-	return nil, fmt.Errorf("no online user source available")
+	v2rayUsers, err := m.getOnlineUsersFromV2Ray()
+	if err != nil {
+		if len(clashUsers) > 0 {
+			return clashUsers, nil
+		}
+		return nil, err
+	}
+
+	if len(clashUsers) == 0 {
+		return v2rayUsers, nil
+	}
+
+	clashUserSet := make(map[string]bool, len(clashUsers))
+	for _, u := range clashUsers {
+		clashUserSet[u.UserID] = true
+	}
+	for _, u := range v2rayUsers {
+		if !clashUserSet[u.UserID] {
+			clashUsers = append(clashUsers, u)
+		}
+	}
+	return clashUsers, nil
 }
 
 func (m *MultiCollector) getOnlineUsersFromV2Ray() ([]*OnlineUser, error) {
