@@ -392,7 +392,7 @@ func (m *MultiCollector) GetOnlineUsers() ([]*OnlineUser, error) {
 		}
 	}
 
-	if m.v2rayStats != nil && m.v2rayStats.IsEnabled() {
+	if m.v2rayStats != nil {
 		return m.getOnlineUsersFromV2Ray()
 	}
 

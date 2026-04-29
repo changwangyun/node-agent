@@ -33,12 +33,12 @@ func NewV2RayStatsCollector(addr string) *V2RayStatsCollector {
 		addr:        addr,
 		userTraffic: make(map[string]*UserTraffic),
 	}
-	c.connect()
+	c.tryConnect()
 	return c
 }
 
-func (v *V2RayStatsCollector) connect() {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+func (v *V2RayStatsCollector) tryConnect() {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
 	conn, err := grpc.DialContext(ctx, v.addr,
@@ -97,7 +97,7 @@ func (v *V2RayStatsCollector) refresh() error {
 		if v.conn != nil {
 			v.conn.Close()
 		}
-		v.connect()
+		v.tryConnect()
 		if !v.enabled {
 			return fmt.Errorf("v2ray api not available")
 		}
