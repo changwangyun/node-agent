@@ -234,6 +234,50 @@ func (s *SingBoxStatsCollector) GetOnlineUsers() ([]*OnlineUser, error) {
 	return extractOnlineUsers(connResp.Connections), nil
 }
 
+type userIPInfo struct {
+	inbound string
+	ip      string
+}
+
+func (s *SingBoxStatsCollector) getUserIPMap() map[string]*userIPInfo {
+	result := make(map[string]*userIPInfo)
+
+	body, err := s.doRequest("/connections")
+	if err != nil {
+		return result
+	}
+
+	var connResp clashConnectionsResponse
+	if err := json.Unmarshal(body, &connResp); err != nil {
+		return result
+	}
+
+	for _, conn := range connResp.Connections {
+		if conn.Metadata.InboundUser != "" {
+			result[conn.Metadata.InboundUser] = &userIPInfo{
+				inbound: conn.Metadata.Inbound,
+				ip:      conn.Metadata.SourceIP,
+			}
+		}
+	}
+
+	return result
+}
+
+func (s *SingBoxStatsCollector) getActiveConnections() []clashConnectionDetail {
+	body, err := s.doRequest("/connections")
+	if err != nil {
+		return nil
+	}
+
+	var connResp clashConnectionsResponse
+	if err := json.Unmarshal(body, &connResp); err != nil {
+		return nil
+	}
+
+	return connResp.Connections
+}
+
 func (s *SingBoxStatsCollector) GetStats() (*StatsResult, error) {
 	s.mu.Lock()
 
@@ -406,6 +450,21 @@ func (m *MultiCollector) getOnlineUsersFromV2Ray() ([]*OnlineUser, error) {
 		return nil, fmt.Errorf("v2ray api: %w", err)
 	}
 
+	ipMap := make(map[string]*userIPInfo)
+	var fallbackInbound string
+	var fallbackIPs []string
+
+	if sc, ok := m.primary.(*SingBoxStatsCollector); ok {
+		ipMap = sc.getUserIPMap()
+		conns := sc.getActiveConnections()
+		for _, conn := range conns {
+			if conn.Metadata.InboundUser == "" && conn.Metadata.SourceIP != "" {
+				fallbackInbound = conn.Metadata.Inbound
+				fallbackIPs = append(fallbackIPs, conn.Metadata.SourceIP)
+			}
+		}
+	}
+
 	var result []*OnlineUser
 	for _, ut := range allTraffic {
 		if strings.HasPrefix(ut.UserID, "outbound:") {
@@ -427,11 +486,22 @@ func (m *MultiCollector) getOnlineUsersFromV2Ray() ([]*OnlineUser, error) {
 			deltaUp = ut.Upload
 			deltaDown = ut.Download
 		}
-		result = append(result, &OnlineUser{
+
+		onlineUser := &OnlineUser{
 			UserID:   ut.UserID,
 			Upload:   deltaUp,
 			Download: deltaDown,
-		})
+		}
+		if info, ok := ipMap[ut.UserID]; ok {
+			onlineUser.Inbound = info.inbound
+			onlineUser.IP = info.ip
+		} else if fallbackInbound != "" {
+			onlineUser.Inbound = fallbackInbound
+			if len(fallbackIPs) > 0 {
+				onlineUser.IP = fallbackIPs[0]
+			}
+		}
+		result = append(result, onlineUser)
 	}
 
 	newSnapshot := make(map[string]*UserTraffic, len(allTraffic))
