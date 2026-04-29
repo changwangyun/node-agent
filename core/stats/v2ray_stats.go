@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -125,6 +126,7 @@ func (v *V2RayStatsCollector) refresh() error {
 
 		userID, direction := parseStatName(name)
 		if userID == "" {
+			log.Printf("[v2ray-stats] skipping stat: name=%q value=%d", name, value)
 			continue
 		}
 
@@ -145,9 +147,7 @@ func (v *V2RayStatsCollector) refresh() error {
 }
 
 func parseStatName(name string) (userID, direction string) {
-	// V2Ray stat name format: user>>>{user_id}>>>traffic>>>{uplink|downlink}
-	// or: outbound>>>{tag}>>>traffic>>>{uplink|downlink}
-	parts := splitStatName(name)
+	parts := strings.Split(name, ">>>")
 	if len(parts) < 4 {
 		return "", ""
 	}
@@ -169,25 +169,6 @@ func parseStatName(name string) (userID, direction string) {
 	}
 
 	return "", ""
-}
-
-func splitStatName(name string) []string {
-	var parts []string
-	current := ""
-	for _, c := range name {
-		if c == '>' && len(current) > 0 && current[len(current)-1] == '>' {
-			if current[:len(current)-1] != "" {
-				parts = append(parts, current[:len(current)-1])
-			}
-			current = ""
-			continue
-		}
-		current += string(c)
-	}
-	if current != "" {
-		parts = append(parts, current)
-	}
-	return parts
 }
 
 func (v *V2RayStatsCollector) Close() {
