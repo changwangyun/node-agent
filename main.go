@@ -62,6 +62,7 @@ func main() {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/deploy", withMethods(handler.Deploy, http.MethodPost))
+	mux.HandleFunc("/deploy/remove", withMethods(handler.RemoveUser, http.MethodPost))
 	mux.HandleFunc("/status", withMethods(handler.Status, http.MethodGet))
 	mux.HandleFunc("/stats", withMethods(handler.GetStats, http.MethodGet))
 	mux.HandleFunc("/heartbeat", withMethods(handler.Heartbeat, http.MethodGet))

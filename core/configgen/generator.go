@@ -384,6 +384,11 @@ func (g *Generator) rebuildConfig() (*SingBoxConfig, *ClientConfigResult, error)
 							UUID: uuid,
 							Flow: "xtls-rprx-vision",
 						})
+					case "trojan":
+						inbound.Users = append(inbound.Users, InboundUser{
+							Name:     req.UserID,
+							Password: req.Password,
+						})
 					}
 					existingUsers[req.UserID] = true
 				}
@@ -520,6 +525,8 @@ func (g *Generator) generateInbound(req *DeployRequest, certPath, keyPath string
 		return g.generateVLESSInbound(req, certPath, keyPath, useACME)
 	case "reality":
 		return g.generateRealityInbound(req)
+	case "trojan":
+		return g.generateTrojanInbound(req, certPath, keyPath, useACME)
 	default:
 		return nil, fmt.Errorf("unsupported protocol: %s", req.Protocol)
 	}
@@ -662,6 +669,45 @@ func (g *Generator) generateRealityInbound(req *DeployRequest) (*Inbound, error)
 	return inbound, nil
 }
 
+func (g *Generator) generateTrojanInbound(req *DeployRequest, certPath, keyPath string, useACME bool) (*Inbound, error) {
+	sni := req.SNI
+	if sni == "" {
+		sni = req.Server
+	}
+
+	inbound := &Inbound{
+		Type:       "trojan",
+		Tag:        "trojan-in",
+		Listen:     "0.0.0.0",
+		ListenPort: req.Port,
+		Users:      []InboundUser{{Name: req.UserID, Password: req.Password}},
+		TLS: &InboundTLS{
+			Enabled:    true,
+			ServerName: sni,
+		},
+	}
+
+	if useACME && req.ACMEDomain != "" {
+		inbound.TLS.ACME = &ACMEConfig{
+			Domain: req.ACMEDomain,
+			Email:  req.ACMEEmail,
+		}
+	} else if certPath != "" && keyPath != "" {
+		inbound.TLS.CertificatePath = certPath
+		inbound.TLS.KeyPath = keyPath
+	}
+
+	if req.ObfsType != "" {
+		inbound.Transport = &TransportConfig{
+			Type:    "ws",
+			Path:    "/" + req.ObfsPass,
+			Headers: map[string]string{},
+		}
+	}
+
+	return inbound, nil
+}
+
 func (g *Generator) buildClientConfig(req *DeployRequest, insecure bool) (*ClientConfigResult, error) {
 	sni := req.SNI
 	if sni == "" {
@@ -756,6 +802,27 @@ func (g *Generator) buildClientConfig(req *DeployRequest, insecure bool) (*Clien
 			},
 		}
 		uri = g.buildRealityURI(req, server, sni, uuid, publicKey, shortID)
+
+	case "trojan":
+		clientOutbound = Outbound{
+			Type:       "trojan",
+			Tag:        "proxy",
+			Server:     server,
+			ServerPort: req.Port,
+			Password:   req.Password,
+			TLS: &OutboundTLS{
+				Enabled:    true,
+				ServerName: sni,
+				Insecure:   insecure,
+			},
+		}
+		if req.ObfsType != "" {
+			clientOutbound.Transport = &TransportConfig{
+				Type: "ws",
+				Path: "/" + req.ObfsPass,
+			}
+		}
+		uri = g.buildTrojanURI(req, server, sni, insecure)
 	}
 
 	clientCfg := &SingBoxConfig{
@@ -872,6 +939,29 @@ func (g *Generator) buildRealityURI(req *DeployRequest, server, sni, uuid, publi
 	}
 	u.RawQuery = q.Encode()
 	u.Fragment = fmt.Sprintf("reality-%s", req.NodeID)
+	return u.String()
+}
+
+func (g *Generator) buildTrojanURI(req *DeployRequest, server, sni string, insecure bool) string {
+	u := url.URL{
+		Scheme: "trojan",
+		User:   url.User(req.Password),
+		Host:   fmt.Sprintf("%s:%d", server, req.Port),
+	}
+	q := u.Query()
+	q.Set("security", "tls")
+	q.Set("sni", sni)
+	q.Set("type", "tcp")
+	q.Set("fp", "chrome")
+	if insecure {
+		q.Set("allowInsecure", "1")
+	}
+	if req.ObfsType != "" {
+		q.Set("type", "ws")
+		q.Set("path", "/"+req.ObfsPass)
+	}
+	u.RawQuery = q.Encode()
+	u.Fragment = fmt.Sprintf("trojan-%s", req.NodeID)
 	return u.String()
 }
 

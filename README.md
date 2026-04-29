@@ -34,6 +34,7 @@
   - [5.9 设备管理接口](#59-设备管理接口)
   - [5.10 日志查询接口](#510-日志查询接口)
   - [5.11 健康检查接口](#511-健康检查接口)
+  - [5.12 用户移除接口](#512-用户移除接口)
 - [6. 安全机制](#6-安全机制)
   - [6.1 Token 认证](#61-token-认证)
   - [6.2 IP 白名单](#62-ip-白名单)
@@ -88,13 +89,13 @@
 Node Agent 是一个运行在每台 VPS 上的 VPN 节点控制守护进程，是整个 VPN 平台的**核心执行层**。它负责：
 
 - **sing-box 生命周期管理**：启动、停止、重启、崩溃自动恢复
-- **动态配置下发**：接收控制面指令，生成服务端 sing-box 配置并热更新
-- **多协议支持**：Hysteria2 / VLESS / Reality，可扩展
+- **动态配置下发**：接收控制面指令，生成服务端 sing-box 配置并热更新（SIGHUP Reload，不断开用户连接）
+- **多协议支持**：Hysteria2 / VLESS / Reality / Trojan，可扩展
 - **服务端配置生成**：生成服务端入站配置（inbound），同时生成客户端连接配置
 - **TLS 证书管理**：自动生成自签名证书、支持 ACME 自动签发、支持自定义证书
-- **流量统计**：通过 Clash API 采集全局实时流量数据，通过 V2Ray API 采集按用户流量数据
+- **流量统计**：通过 Clash API 采集全局实时流量数据，通过 V2Ray API 采集按用户流量数据，累计流量持久化到磁盘
 - **设备限制**：用户级设备绑定与并发会话控制
-- **心跳上报**：定时向控制面汇报节点状态、流量、在线用户数
+- **心跳上报**：定时向控制面汇报节点状态、流量、在线用户数，支持指数退避重试
 - **安全防护**：Token 认证、IP 白名单、CORS 跨域、HMAC 签名验证
 - **日志捕获**：sing-box 进程日志实时捕获与查询，崩溃原因追踪
 
@@ -340,6 +341,7 @@ type Config struct {
 | `Start() error` | 启动 sing-box |
 | `Stop() error` | 停止 sing-box（优雅停止 + 强制终止） |
 | `Restart() error` | 重启 sing-box（停止 → 500ms 等待 → 启动） |
+| `Reload() error` | 热更新 sing-box（发送 SIGHUP，不断开用户连接，仅 Unix 平台支持） |
 | `IsRunning() bool` | 检查是否运行中 |
 | `GetState() ProcessState` | 获取当前状态 |
 | `GetUptime() time.Duration` | 获取运行时长 |
@@ -347,6 +349,44 @@ type Config struct {
 | `GetLastError() string` | 获取最近一次错误信息 |
 | `GetCrashTime() time.Time` | 获取最近一次崩溃时间 |
 | `CrashChannel() <-chan struct{}` | 获取崩溃通知 channel |
+
+#### 热更新机制（Reload）
+
+`Reload()` 方法通过向 sing-box 进程发送 `SIGHUP` 信号实现配置热更新，无需重启进程，**不会断开已有用户连接**。
+
+**工作原理**：
+
+1. 获取 sing-box 进程 PID
+2. 通过 `syscall.Kill(pid, syscall.SIGHUP)` 发送 SIGHUP 信号
+3. sing-box 收到信号后重新加载配置文件
+
+**Reload vs Restart 对比**：
+
+| 特性 | Reload (SIGHUP) | Restart (Stop + Start) |
+|------|-----------------|----------------------|
+| 已有连接 | 保持不断开 | 全部断开 |
+| 生效速度 | 毫秒级 | 数秒（停止+启动） |
+| 适用场景 | 新增/移除用户、配置变更 | sing-box 版本升级、端口变更 |
+| 平台支持 | 仅 Unix（Linux/macOS） | 全平台 |
+| 失败回退 | 自动回退到 Restart | 无 |
+
+**Deploy 流程中的使用**：
+
+```
+Deploy / RemoveDeploy
+  │
+  ├── 生成新配置 → 写入 config.json
+  │
+  ├── sing-box 运行中？
+  │   ├── 是 → Reload()
+  │   │   ├── 成功 → 返回成功
+  │   │   └── 失败 → 回退 Restart()
+  │   └── 否 → 不操作（下次 Deploy 时 Start）
+  │
+  └── 返回客户端配置
+```
+
+**注意**：Windows 平台不支持 SIGHUP，`Reload()` 会返回错误，Deploy 流程会自动回退到 `Restart()`。
 
 #### Watchdog 自动恢复
 
@@ -375,7 +415,7 @@ Watchdog 以可配置间隔（默认 5 秒）检测 sing-box 状态，发现崩�
 
 - 根据 DeployRequest 动态生成**服务端** sing-box config.json（入站配置）
 - 同时生成**客户端**连接配置（含 URI 和完整 JSON 配置）
-- 支持 Hysteria2 / VLESS / Reality 三种协议
+- 支持 Hysteria2 / VLESS / Reality / Trojan 四种协议
 - 支持 TLS 自签名证书、ACME 自动签发、自定义证书
 - 支持 Hysteria2 混淆（obfs）和带宽限制
 - 支持 Reality 协议的密钥对和握手配置
@@ -389,7 +429,7 @@ Watchdog 以可配置间隔（默认 5 秒）检测 sing-box 状态，发现崩�
 type DeployRequest struct {
     UserID   string `json:"user_id"`              // 用户 ID（必填）
     NodeID   string `json:"node_id"`              // 节点 ID（必填）
-    Protocol string `json:"protocol"`             // 协议：hysteria2 / vless / reality（必填）
+    Protocol string `json:"protocol"`             // 协议：hysteria2 / vless / reality / trojan（必填）
     Server   string `json:"server"`               // 服务器地址（默认 0.0.0.0）
     Port     int    `json:"port"`                 // 服务器端口（必填）
     Password string `json:"password"`             // 密码 / Token
@@ -451,6 +491,7 @@ Deploy 时生成**服务端** sing-box 配置，核心流程：
    - Hysteria2：`type: "hysteria2"`，含 users（name + password）、TLS、obfs、带宽限制
    - VLESS：`type: "vless"`，含 users（name + UUID + flow）、TLS
    - Reality：`type: "vless"`，含 Reality TLS（private_key、short_id、handshake）
+   - Trojan：`type: "trojan"`，含 users（name + password）、TLS，可选 WebSocket 传输
 
 5. **生成客户端出站配置（outbound）**：
    - 根据协议生成对应的客户端出站配置
@@ -461,6 +502,7 @@ Deploy 时生成**服务端** sing-box 配置，核心流程：
    - Hysteria2：`hysteria2://password@server:port?sni=xxx`
    - VLESS：`vless://uuid@server:port?security=tls&sni=xxx`
    - Reality：`vless://uuid@server:port?security=reality&pbk=xxx&sid=xxx`
+   - Trojan：`trojan://password@server:port?security=tls&sni=xxx&type=tcp&fp=chrome`
 
 > **多用户合并机制**：每次 Deploy 不会覆盖已有用户配置，而是将新用户追加到对应 inbound 的 users 列表中。例如先部署 user-001（hysteria2, port 443），再部署 user-002（hysteria2, port 443），最终生成的 inbound 会包含 `users: [{name: "user-001", password: "..."}, {name: "user-002", password: "..."}]`。RemoveDeploy 删除用户后也会重新构建配置。
 
@@ -526,6 +568,47 @@ Deploy 时生成**服务端** sing-box 配置，核心流程：
         "server_port": 443
       }
     }
+  }
+}
+```
+
+**Trojan 服务端入站**：
+
+```json
+{
+  "type": "trojan",
+  "tag": "trojan-in",
+  "listen": "0.0.0.0",
+  "listen_port": 443,
+  "users": [{"name": "user-001", "password": "user_password"}],
+  "tls": {
+    "enabled": true,
+    "server_name": "example.com",
+    "certificate_path": "/path/to/cert.pem",
+    "key_path": "/path/to/key.pem"
+  }
+}
+```
+
+**Trojan + WebSocket 传输**（指定 `obfs_type` 时自动启用）：
+
+```json
+{
+  "type": "trojan",
+  "tag": "trojan-in",
+  "listen": "0.0.0.0",
+  "listen_port": 443,
+  "users": [{"name": "user-001", "password": "user_password"}],
+  "tls": {
+    "enabled": true,
+    "server_name": "example.com",
+    "certificate_path": "/path/to/cert.pem",
+    "key_path": "/path/to/key.pem"
+  },
+  "transport": {
+    "type": "ws",
+    "path": "/obfs_password",
+    "headers": {}
   }
 }
 ```
@@ -682,6 +765,37 @@ if deltaUp > 0 {
 ```
 
 当 `deltaUp <= 0` 时（说明 sing-box 重启了），跳过本次更新，避免累计值出现负数。
+
+#### 流量持久化
+
+累计流量数据持久化到磁盘，Node Agent 重启后自动恢复：
+
+**持久化机制**：
+
+| 项目 | 说明 |
+|------|------|
+| 存储路径 | `/var/lib/node-agent/traffic.json` |
+| 写入频率 | 每 30 秒自动保存 |
+| 停止保存 | Node Agent 优雅停止时立即保存 |
+| 加载时机 | `NewSingBoxStatsCollector` 初始化时从磁盘加载 |
+| 写入方式 | 原子写入（先写 `.tmp` 再 `rename`），避免半写状态 |
+
+**持久化数据格式**：
+
+```json
+{
+  "upload": 1073741824,
+  "download": 2147483648
+}
+```
+
+**工作流程**：
+
+1. 启动时：从 `traffic.json` 加载已保存的累计流量
+2. 运行中：每 30 秒将当前 `totalTraffic` 保存到磁盘
+3. 停止时：通过 `stopPersist` channel 触发最终保存
+
+**注意**：持久化仅保存全局累计流量（`totalTraffic`），不保存按用户流量（V2Ray API 的流量数据由 sing-box 进程维护，重启后重置）。
 
 #### FallbackCollector
 
@@ -863,6 +977,49 @@ ReleaseSession(userID)
 - 启动时立即发送一次心跳，之后定时发送
 - 支持优雅停止（通过 `stopCh` channel）
 
+#### 指数退避重试机制
+
+心跳发送失败时自动重试，采用指数退避策略避免对控制面造成压力：
+
+**重试策略**：
+
+| 参数 | 值 | 说明 |
+|------|------|------|
+| 最大重试次数 | 3 | 每次心跳最多重试 3 次 |
+| 退避算法 | 指数退避 | `2^(attempt-1)` 秒 |
+| 最大退避时间 | 30 秒 | 单次退避不超过 30 秒 |
+| 重试条件 | 5xx 错误 / 网络错误 | 4xx 错误不重试 |
+
+**退避时间表**：
+
+| 重试次数 | 等待时间 |
+|----------|----------|
+| 第 1 次 | 1 秒 |
+| 第 2 次 | 2 秒 |
+| 第 3 次 | 4 秒 |
+| 最大 | 30 秒 |
+
+**重试流程**：
+
+```
+发送心跳
+  │
+  ├── 成功 (200 OK) → 重置 consecutiveFails，结束
+  │
+  ├── 4xx 错误 → 不重试，记录日志，结束
+  │
+  ├── 5xx 错误 → 重试
+  │
+  └── 网络错误 → 重试
+       │
+       ├── 等待退避时间
+       │   └── 收到 stopCh → 立即停止
+       │
+       └── 重试次数耗尽 → consecutiveFails++，记录日志
+```
+
+**注意**：重试期间若收到停止信号（`stopCh`），会立即退出重试循环，确保 Node Agent 可以快速优雅停止。
+
 ---
 
 ### 4.8 系统信息采集模块 (utils)
@@ -917,7 +1074,7 @@ HTTP 状态码：`401 Unauthorized`
 
 #### `POST /deploy`
 
-下发用户节点配置，生成服务端 sing-box config.json 并重启 sing-box，同时返回客户端连接配置。
+下发用户节点配置，生成服务端 sing-box config.json 并热更新（SIGHUP Reload，不断开用户连接），同时返回客户端连接配置。若 Reload 失败则自动回退到 Restart。
 
 **请求体**：
 
@@ -939,7 +1096,7 @@ HTTP 状态码：`401 Unauthorized`
 |------|------|------|------|
 | `user_id` | string | 是 | 用户 ID |
 | `node_id` | string | 是 | 节点 ID |
-| `protocol` | string | 是 | 协议类型：`hysteria2` / `vless` / `reality` |
+| `protocol` | string | 是 | 协议类型：`hysteria2` / `vless` / `reality` / `trojan` |
 | `server` | string | 否 | 服务器地址（默认 `0.0.0.0`，客户端配置中会替换为 `YOUR_SERVER_IP`） |
 | `port` | int | 是 | 服务器端口 |
 | `password` | string | 否 | 认证密码/Token |
@@ -1459,6 +1616,54 @@ ok
 
 ---
 
+### 5.12 用户移除接口
+
+#### `POST /deploy/remove`
+
+移除已部署的用户配置，从 sing-box 配置中删除该用户并热更新（SIGHUP Reload），不影响其他在线用户。
+
+**请求体**：
+
+```json
+{
+  "user_id": "123"
+}
+```
+
+**字段说明**：
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `user_id` | string | 是 | 要移除的用户 ID |
+
+**成功响应** (`200 OK`)：
+
+```json
+{
+  "success": true,
+  "message": "user 123 removed"
+}
+```
+
+**工作流程**：
+
+1. 加锁（`deployMu`），确保与 `/deploy` 操作互斥
+2. 从 `deploys` 映射表中删除该用户的部署记录
+3. 重新构建 sing-box 配置（其他用户不受影响）
+4. 原子写入配置文件
+5. 若 sing-box 运行中，发送 SIGHUP 热更新；若 Reload 失败则回退到 Restart
+
+**错误响应**：
+
+| 状态码 | 场景 |
+|--------|------|
+| 400 | 缺少 `user_id` 字段 |
+| 500 | 移除失败（用户不存在）/ Reload 和 Restart 均失败 |
+
+**原子性保证**：`/deploy` 和 `/deploy/remove` 共享同一把互斥锁（`deployMu`），确保并发请求不会导致配置竞态条件。
+
+---
+
 ## 6. 安全机制
 
 ### 6.1 Token 认证
@@ -1885,6 +2090,18 @@ vless://uuid@server:port?encryption=none&flow=xtls-rprx-vision&security=tls&sni=
 vless://uuid@server:port?encryption=none&flow=xtls-rprx-vision&security=reality&sni=xxx&type=tcp&fp=chrome&pbk=public_key&sid=short_id#reality-node-id
 ```
 
+**Trojan URI 格式**：
+
+```
+trojan://password@server:port?security=tls&sni=xxx&type=tcp&fp=chrome#trojan-node-id
+```
+
+**Trojan + WebSocket URI 格式**（指定 `obfs_type` 时）：
+
+```
+trojan://password@server:port?security=tls&sni=xxx&type=ws&path=/obfs_password#trojan-node-id
+```
+
 **支持的客户端**：
 
 | 客户端 | 平台 | URI 导入 | JSON 配置 |
@@ -1950,6 +2167,21 @@ vless://uuid@server:port?encryption=none&flow=xtls-rprx-vision&security=reality&
 | `short_id` | Short ID | 部署时指定 |
 
 **Reality 密钥对**：Reality 协议使用 X25519 密钥对。服务端配置 `private_key`，客户端配置 `public_key`。如果在 Deploy 请求中只提供了 `reality_private_key`，Node Agent 会自动推导出公钥并填入客户端配置。
+
+#### Trojan
+
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `password` | 认证密码 | 必填 |
+| `sni` | TLS SNI | 使用 server 值 |
+| `insecure` | 允许不安全 TLS（自签名证书时为 `true`） | `false` |
+| `obfs_type` | 传输层混淆（指定时启用 WebSocket 传输） | 无 |
+| `obfs_password` | WebSocket 路径密码 | 无 |
+
+**Trojan 传输模式**：
+
+- **直连模式**（默认）：`type=tcp`，标准 Trojan + TLS 连接
+- **WebSocket 模式**：指定 `obfs_type` 后自动启用，`type=ws`，通过 WebSocket 传输，路径为 `/{obfs_password}`，适用于需要穿越 HTTP 代理或 CDN 的场景
 
 ---
 
@@ -2413,6 +2645,12 @@ public function deployToNode($node, $user, $protocol)
 
 // VLESS + TLS
 {"sni":"example.com","acme_domain":"example.com","acme_email":"admin@example.com"}
+
+// Trojan + TLS
+{"sni":"example.com"}
+
+// Trojan + WebSocket
+{"sni":"example.com","obfs_type":"ws","obfs_password":"xxx"}
 ```
 
 ### 12.2 核心服务实现
@@ -2430,6 +2668,11 @@ class NodeAgentClient
     public function status(Node $node): array
     {
         return $this->get($node, '/status');
+    }
+
+    public function removeUser(Node $node, string $userId): array
+    {
+        return $this->post($node, '/deploy/remove', ['user_id' => $userId]);
     }
 
     public function online(Node $node): array
@@ -2520,6 +2763,14 @@ class SyncService
             $payload['reality_short_id'] = $protocol->config['reality_short_id'];
             $payload['reality_dest'] = $protocol->config['reality_dest'] ?? 'www.microsoft.com';
             $payload['reality_dest_port'] = $protocol->config['reality_dest_port'] ?? 443;
+        }
+
+        if ($protocol->protocol === 'trojan') {
+            $payload['password'] = $password;
+            if (isset($protocol->config['obfs_type'])) {
+                $payload['obfs_type'] = $protocol->config['obfs_type'];
+                $payload['obfs_password'] = $protocol->config['obfs_password'] ?? '';
+            }
         }
 
         return $this->client->deploy($node, $payload);
@@ -2943,6 +3194,43 @@ app/
 }
 ```
 
+**Trojan + TLS**：
+
+```json
+{
+  "type": "trojan",
+  "tag": "proxy",
+  "server": "节点IP或域名",
+  "server_port": 443,
+  "password": "用户密码",
+  "tls": {
+    "enabled": true,
+    "server_name": "SNI域名",
+    "utls": { "enabled": true, "fingerprint": "chrome" }
+  }
+}
+```
+
+**Trojan + WebSocket**：
+
+```json
+{
+  "type": "trojan",
+  "tag": "proxy",
+  "server": "节点IP或域名",
+  "server_port": 443,
+  "password": "用户密码",
+  "tls": {
+    "enabled": true,
+    "server_name": "SNI域名"
+  },
+  "transport": {
+    "type": "ws",
+    "path": "/obfs_password"
+  }
+}
+```
+
 ### 13.4 Hysteria2 性能优化配置
 
 Hysteria2 是基于 QUIC 的协议，客户端配置对性能影响很大。以下是关键优化点：
@@ -3228,6 +3516,33 @@ object ConfigBuilder {
         return buildFullConfig(outbound)
     }
 
+    fun buildTrojanConfig(
+        server: String, port: Int, password: String,
+        sni: String, obfsType: String? = null, obfsPassword: String? = null
+    ): String {
+        val outbound = mutableMapOf<String, Any>(
+            "type" to "trojan",
+            "tag" to "proxy",
+            "server" to server,
+            "server_port" to port,
+            "password" to password,
+            "tls" to mapOf(
+                "enabled" to true,
+                "server_name" to sni,
+                "utls" to mapOf("enabled" to true, "fingerprint" to "chrome")
+            )
+        )
+
+        if (obfsType != null) {
+            outbound["transport"] = mapOf(
+                "type" to "ws",
+                "path" to "/${obfsPassword ?: ""}"
+            )
+        }
+
+        return buildFullConfig(outbound)
+    }
+
     private fun buildFullConfig(outbound: Map<String, Any>): String {
         val config = mapOf<String, Any>(
             "log" to mapOf("level" to "warn"),
@@ -3295,10 +3610,38 @@ object ConfigBuilder {
 | 日志捕获 | RingBuffer（200 行） | 内存可控，避免日志文件膨胀 | 仅保留最近 200 行 |
 | 客户端配置 | Deploy 时同时生成 | 一次部署即可获取所有连接信息 | 配置存储在内存中，重启后需重新部署 |
 | Watchdog | 配置文件存在时才重启 | 避免无配置时反复启动失败 | 首次部署前 sing-box 不会自动启动 |
+| 配置热更新 | SIGHUP Reload 优先 | 不断开用户连接，毫秒级生效 | Windows 不支持，自动回退到 Restart |
+| Deploy 原子性 | deployMu 互斥锁 | 防止并发 Deploy/Remove 竞态条件 | 增加少量锁等待延迟 |
+| 心跳重试 | 指数退避（最多 3 次） | 应对控制面临时不可用 | 增加心跳延迟（最坏情况 +7s） |
+| 流量持久化 | 每 30s 写入磁盘 | 重启后恢复累计流量 | 最多丢失 30s 数据 |
+| Trojan 传输 | 可选 WebSocket | 支持 CDN 中转和穿越 HTTP 代理 | WS 传输性能低于直连 |
 
 ---
 
 ## 15. 版本变更记录
+
+### v1.11.0 (2026-04-30)
+
+**新功能**：
+
+- **Trojan 协议支持**：新增 Trojan inbound/outbound/URI 生成，支持 TLS 直连和 WebSocket 传输两种模式
+- **用户移除接口**：`POST /deploy/remove`，移除用户配置并热更新，不影响其他在线用户
+- **配置热更新**：`Manager.Reload()` 方法，通过 SIGHUP 信号热更新 sing-box 配置，不断开用户连接，Reload 失败自动回退到 Restart
+- **Deploy 原子性**：`deployMu` 互斥锁保护 Deploy 和 Remove 操作，防止并发竞态条件
+- **心跳重试机制**：指数退避重试（最多 3 次），5xx 错误和网络错误自动重试，4xx 错误不重试
+- **流量统计持久化**：累计流量数据每 30 秒保存到 `/var/lib/node-agent/traffic.json`，重启后自动恢复
+
+**文档更新**：
+
+- 新增 Trojan 服务端入站配置示例（直连 + WebSocket）
+- 新增 Trojan URI 格式和客户端参数说明
+- 新增热更新机制（Reload）详细文档和 Reload vs Restart 对比表
+- 新增 `/deploy/remove` API 接口文档
+- 新增流量持久化机制说明
+- 新增心跳指数退避重试机制说明
+- 新增设计决策：热更新、原子性、重试、持久化、Trojan 传输
+- Laravel 控制面板指南添加 Trojan 协议配置和 removeUser 方法
+- Android 客户端指南添加 buildTrojanConfig 方法
 
 ### v1.10.0 (2026-04-30)
 

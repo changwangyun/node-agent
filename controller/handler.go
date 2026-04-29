@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 
 	"node-agent/core/configgen"
 	"node-agent/core/device"
@@ -22,6 +23,7 @@ type Handler struct {
 	v2rayStats *stats.V2RayStatsCollector
 	limiter    *device.DeviceLimiter
 	reporter   *heartbeat.Reporter
+	deployMu   sync.Mutex
 }
 
 func NewHandler(
@@ -63,6 +65,9 @@ func (h *Handler) Deploy(w http.ResponseWriter, r *http.Request) {
 		req.Server = "0.0.0.0"
 	}
 
+	h.deployMu.Lock()
+	defer h.deployMu.Unlock()
+
 	clientCfg, err := h.generator.GenerateAndWrite(&req)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "generate config failed: "+err.Error())
@@ -70,9 +75,11 @@ func (h *Handler) Deploy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if h.mgr.IsRunning() {
-		if err := h.mgr.Restart(); err != nil {
-			writeError(w, http.StatusInternalServerError, "restart sing-box failed: "+err.Error())
-			return
+		if err := h.mgr.Reload(); err != nil {
+			if err2 := h.mgr.Restart(); err2 != nil {
+				writeError(w, http.StatusInternalServerError, "reload and restart failed: "+err.Error()+", "+err2.Error())
+				return
+			}
 		}
 	} else {
 		if err := h.mgr.Start(); err != nil {
@@ -257,6 +264,42 @@ func (h *Handler) GetOnlineUsers(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 	payload := h.reporter.GetPayload()
 	writeJSON(w, http.StatusOK, payload)
+}
+
+func (h *Handler) RemoveUser(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		UserID string `json:"user_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.UserID == "" {
+		writeError(w, http.StatusBadRequest, "missing required field: user_id")
+		return
+	}
+
+	h.deployMu.Lock()
+	defer h.deployMu.Unlock()
+
+	if err := h.generator.RemoveDeploy(req.UserID); err != nil {
+		writeError(w, http.StatusInternalServerError, "remove user failed: "+err.Error())
+		return
+	}
+
+	if h.mgr.IsRunning() {
+		if err := h.mgr.Reload(); err != nil {
+			if err2 := h.mgr.Restart(); err2 != nil {
+				writeError(w, http.StatusInternalServerError, "reload and restart failed: "+err.Error()+", "+err2.Error())
+				return
+			}
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"message": fmt.Sprintf("user %s removed", req.UserID),
+	})
 }
 
 func (h *Handler) Restart(w http.ResponseWriter, r *http.Request) {

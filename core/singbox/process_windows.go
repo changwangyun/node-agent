@@ -3,6 +3,7 @@
 package singbox
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 )
@@ -24,4 +25,8 @@ func sendSigkill(pid int) error {
 		return err
 	}
 	return proc.Kill()
+}
+
+func sendSighup(pid int) error {
+	return fmt.Errorf("SIGHUP not supported on windows")
 }

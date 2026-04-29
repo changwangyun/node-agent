@@ -20,3 +20,7 @@ func sendSigterm(pid int) error {
 func sendSigkill(pid int) error {
 	return syscall.Kill(-pid, syscall.SIGKILL)
 }
+
+func sendSighup(pid int) error {
+	return syscall.Kill(pid, syscall.SIGHUP)
+}

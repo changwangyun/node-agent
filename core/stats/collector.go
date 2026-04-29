@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -54,6 +56,8 @@ type SingBoxStatsCollector struct {
 
 	lastConnTraffic *TrafficData
 	totalTraffic    *TrafficData
+	persistPath     string
+	stopPersist     chan struct{}
 }
 
 type clashTrafficResponse struct {
@@ -83,7 +87,7 @@ type clashConnectionDetail struct {
 }
 
 func NewSingBoxStatsCollector(clashAPIAddr, secret string) *SingBoxStatsCollector {
-	return &SingBoxStatsCollector{
+	s := &SingBoxStatsCollector{
 		baseURL: fmt.Sprintf("http://%s", clashAPIAddr),
 		secret:  secret,
 		client: &http.Client{
@@ -91,7 +95,69 @@ func NewSingBoxStatsCollector(clashAPIAddr, secret string) *SingBoxStatsCollecto
 		},
 		totalTraffic:    &TrafficData{},
 		lastConnTraffic: &TrafficData{},
+		persistPath:     "/var/lib/node-agent/traffic.json",
+		stopPersist:     make(chan struct{}),
 	}
+	s.loadFromDisk()
+	go s.persistLoop()
+	return s
+}
+
+func (s *SingBoxStatsCollector) SetPersistPath(path string) {
+	s.mu.Lock()
+	s.persistPath = path
+	s.mu.Unlock()
+}
+
+func (s *SingBoxStatsCollector) loadFromDisk() {
+	data, err := os.ReadFile(s.persistPath)
+	if err != nil {
+		return
+	}
+	var saved TrafficData
+	if err := json.Unmarshal(data, &saved); err != nil {
+		return
+	}
+	s.totalTraffic.Upload = saved.Upload
+	s.totalTraffic.Download = saved.Download
+}
+
+func (s *SingBoxStatsCollector) saveToDisk() {
+	s.mu.RLock()
+	data, err := json.Marshal(s.totalTraffic)
+	path := s.persistPath
+	s.mu.RUnlock()
+
+	if err != nil {
+		return
+	}
+
+	dir := filepath.Dir(path)
+	os.MkdirAll(dir, 0755)
+
+	tmpFile := path + ".tmp"
+	if err := os.WriteFile(tmpFile, data, 0644); err != nil {
+		return
+	}
+	os.Rename(tmpFile, path)
+}
+
+func (s *SingBoxStatsCollector) persistLoop() {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			s.saveToDisk()
+		case <-s.stopPersist:
+			s.saveToDisk()
+			return
+		}
+	}
+}
+
+func (s *SingBoxStatsCollector) Close() {
+	close(s.stopPersist)
 }
 
 func (s *SingBoxStatsCollector) doRequest(path string) ([]byte, error) {

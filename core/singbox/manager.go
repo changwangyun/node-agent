@@ -280,6 +280,25 @@ func (m *Manager) Restart() error {
 	return m.Start()
 }
 
+func (m *Manager) Reload() error {
+	m.mu.RLock()
+	pid := 0
+	if m.cmd != nil && m.cmd.Process != nil {
+		pid = m.cmd.Process.Pid
+	}
+	m.mu.RUnlock()
+
+	if pid == 0 {
+		return fmt.Errorf("sing-box is not running")
+	}
+
+	if err := sendSighup(pid); err != nil {
+		return fmt.Errorf("send SIGHUP: %w", err)
+	}
+
+	return nil
+}
+
 func (m *Manager) IsRunning() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

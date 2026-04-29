@@ -56,14 +56,16 @@ type SystemReport struct {
 }
 
 type Reporter struct {
-	mu        sync.RWMutex
-	cfg       *config.Config
-	mgr       *singbox.Manager
-	collector stats.Collector
-	limiter   *device.DeviceLimiter
-	client    *http.Client
-	stopCh    chan struct{}
-	running   bool
+	mu               sync.RWMutex
+	cfg              *config.Config
+	mgr              *singbox.Manager
+	collector        stats.Collector
+	limiter          *device.DeviceLimiter
+	client           *http.Client
+	stopCh           chan struct{}
+	running          bool
+	consecutiveFails int
+	maxRetries       int
 }
 
 func NewReporter(
@@ -80,7 +82,8 @@ func NewReporter(
 		client: &http.Client{
 			Timeout: time.Duration(cfg.ControlPlane.Timeout) * time.Second,
 		},
-		stopCh: make(chan struct{}),
+		stopCh:     make(chan struct{}),
+		maxRetries: 3,
 	}
 }
 
@@ -134,26 +137,66 @@ func (r *Reporter) sendHeartbeat() {
 		heartbeatPath = "/api/v1/node/heartbeat"
 	}
 	url := fmt.Sprintf("%s%s", r.cfg.GetControlPlaneURL(), heartbeatPath)
-	req, err := http.NewRequest("POST", url, bytes.NewReader(data))
-	if err != nil {
-		log.Printf("[heartbeat] create request error: %v", err)
-		return
-	}
 
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Node-Token", r.cfg.ControlPlane.Token)
-	req.Header.Set("X-Node-ID", r.cfg.ControlPlane.NodeID)
+	var lastErr error
+	for attempt := 0; attempt <= r.maxRetries; attempt++ {
+		if attempt > 0 {
+			backoff := time.Duration(1<<(attempt-1)) * time.Second
+			if backoff > 30*time.Second {
+				backoff = 30 * time.Second
+			}
+			log.Printf("[heartbeat] retry attempt %d/%d after %v", attempt, r.maxRetries, backoff)
 
-	resp, err := r.client.Do(req)
-	if err != nil {
-		log.Printf("[heartbeat] send error: %v", err)
-		return
-	}
-	defer resp.Body.Close()
+			select {
+			case <-time.After(backoff):
+			case <-r.stopCh:
+				return
+			}
+		}
 
-	if resp.StatusCode != http.StatusOK {
+		req, err := http.NewRequest("POST", url, bytes.NewReader(data))
+		if err != nil {
+			log.Printf("[heartbeat] create request error: %v", err)
+			return
+		}
+
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Node-Token", r.cfg.ControlPlane.Token)
+		req.Header.Set("X-Node-ID", r.cfg.ControlPlane.NodeID)
+
+		resp, err := r.client.Do(req)
+		if err != nil {
+			lastErr = err
+			log.Printf("[heartbeat] send error (attempt %d/%d): %v", attempt+1, r.maxRetries+1, err)
+			continue
+		}
+
+		if resp.StatusCode == http.StatusOK {
+			resp.Body.Close()
+			r.mu.Lock()
+			r.consecutiveFails = 0
+			r.mu.Unlock()
+			return
+		}
+
+		if resp.StatusCode >= 500 {
+			resp.Body.Close()
+			lastErr = fmt.Errorf("server returned status: %d", resp.StatusCode)
+			log.Printf("[heartbeat] server error (attempt %d/%d): %d", attempt+1, r.maxRetries+1, resp.StatusCode)
+			continue
+		}
+
+		resp.Body.Close()
 		log.Printf("[heartbeat] server returned status: %d", resp.StatusCode)
+		return
 	}
+
+	r.mu.Lock()
+	r.consecutiveFails++
+	r.mu.Unlock()
+
+	log.Printf("[heartbeat] all %d attempts failed, consecutive failures: %d, last error: %v",
+		r.maxRetries+1, r.consecutiveFails, lastErr)
 }
 
 func (r *Reporter) buildPayload() *HeartbeatPayload {
