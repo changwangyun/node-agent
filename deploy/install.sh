@@ -428,7 +428,8 @@ optimize_system() {
     if ! grep -q "net.core.rmem_max" "$sysctl_file" 2>/dev/null || \
        ! grep -q "16777216" "$sysctl_file" 2>/dev/null; then
         cat > "$sysctl_file" << 'SYSCTL'
-# Node Agent - Hysteria2/QUIC Performance Optimization
+# Node Agent - Network Performance Optimization
+# UDP Buffer (Hysteria2/QUIC critical)
 net.core.rmem_max=16777216
 net.core.wmem_max=16777216
 net.core.rmem_default=16777216
@@ -437,15 +438,34 @@ net.core.netdev_max_backlog=65536
 net.ipv4.udp_mem=65536 131072 262144
 net.ipv4.udp_rmem_min=16384
 net.ipv4.udp_wmem_min=16384
+# TCP Buffer
+net.ipv4.tcp_rmem=4096 87380 16777216
+net.ipv4.tcp_wmem=4096 65536 16777216
+# TCP Performance
 net.core.somaxconn=65535
 net.ipv4.tcp_fastopen=3
+net.ipv4.tcp_slow_start_after_idle=0
+net.ipv4.tcp_mtu_probing=1
+net.ipv4.tcp_window_scaling=1
+net.ipv4.tcp_sack=1
+net.ipv4.tcp_fack=1
+net.ipv4.tcp_low_latency=1
+net.ipv4.tcp_no_metrics_save=1
+net.ipv4.tcp_tw_reuse=1
+net.ipv4.tcp_max_syn_backlog=65535
+net.ipv4.tcp_max_tw_buckets=65535
+net.ipv4.tcp_syncookies=1
+net.ipv4.ip_local_port_range=1024 65535
+# Connection Tracking
+net.netfilter.nf_conntrack_max=1048576
+net.netfilter.nf_conntrack_tcp_timeout_established=7200
 SYSCTL
         changed=true
     fi
 
     if [ "$changed" = true ]; then
         sysctl -p "$sysctl_file" 2>/dev/null || true
-        ok "UDP 缓冲区已优化 (16MB)"
+        ok "网络参数已优化 (UDP 16MB + TCP BBR)"
     else
         info "系统网络参数已优化，跳过"
     fi
@@ -460,6 +480,7 @@ SYSCTL
                 fi
                 if ! grep -q "tcp_congestion_control" "$sysctl_file" 2>/dev/null; then
                     cat >> "$sysctl_file" << 'BBR'
+# BBR Congestion Control
 net.ipv4.tcp_congestion_control=bbr
 net.core.default_qdisc=fq
 BBR
@@ -467,11 +488,27 @@ BBR
                 fi
                 ok "BBR 拥塞控制已启用"
             else
-                warn "无法加载 tcp_bbr 模块，跳过 BBR 优化"
+                if ! grep -q "default_qdisc" "$sysctl_file" 2>/dev/null; then
+                    cat >> "$sysctl_file" << 'FQCODEL'
+net.core.default_qdisc=fq_codel
+FQCODEL
+                    sysctl -p "$sysctl_file" 2>/dev/null || true
+                fi
+                warn "无法加载 tcp_bbr 模块，已启用 fq_codel 队列调度作为备选"
             fi
         else
             info "BBR 已启用，跳过"
         fi
+    fi
+
+    local kernel_ver
+    kernel_ver=$(uname -r | cut -d. -f1-2 2>/dev/null || echo "0")
+    local major=$(echo "$kernel_ver" | cut -d. -f1)
+    local minor=$(echo "$kernel_ver" | cut -d. -f2)
+    if [ "$major" -gt 5 ] || { [ "$major" -eq 5 ] && [ "$minor" -ge 9 ]; }; then
+        info "内核 $(uname -r) 支持 BBR，TCP 性能优化已就绪"
+    else
+        warn "内核 $(uname -r) 较旧 (< 5.9)，建议升级内核以获得更好 BBR 支持"
     fi
 }
 
