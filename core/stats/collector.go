@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -407,6 +408,9 @@ func (m *MultiCollector) getOnlineUsersFromV2Ray() ([]*OnlineUser, error) {
 
 	var result []*OnlineUser
 	for _, ut := range allTraffic {
+		if strings.HasPrefix(ut.UserID, "outbound:") {
+			continue
+		}
 		if ut.Upload == 0 && ut.Download == 0 {
 			continue
 		}
