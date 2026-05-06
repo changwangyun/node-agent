@@ -50,6 +50,9 @@ func main() {
 	sbVer, err := mgr.GetVersion()
 	if err != nil {
 		log.Printf("[main] failed to get sing-box version: %v", err)
+	} else if sbVer == "unknown" {
+		log.Printf("[main] sing-box version: unknown (compiled without version info)")
+		generator.SetSingboxVersion(sbVer)
 	} else {
 		log.Printf("[main] sing-box version: %s", sbVer)
 		generator.SetSingboxVersion(sbVer)
