@@ -565,12 +565,17 @@ func (g *Generator) generateHysteria2Inbound(req *DeployRequest, certPath, keyPa
 		sni = req.Server
 	}
 
+	password := req.Password
+	if password == "" {
+		password = req.UserID
+	}
+
 	inbound := &Inbound{
 		Type:       "hysteria2",
 		Tag:        "hysteria2-in",
 		Listen:     "0.0.0.0",
 		ListenPort: req.Port,
-		Users:      []InboundUser{{Name: req.UserID, Password: req.Password}},
+		Users:      []InboundUser{{Name: req.UserID, Password: password}},
 		Masquerade: "https://www.bing.com",
 		TLS:        &InboundTLS{Enabled: true, ServerName: sni, ALPN: []string{"h3"}},
 	}
@@ -754,12 +759,16 @@ func (g *Generator) buildClientConfig(req *DeployRequest, insecure bool) (*Clien
 
 	switch req.Protocol {
 	case "hysteria2":
+		password := req.Password
+		if password == "" {
+			password = req.UserID
+		}
 		clientOutbound = Outbound{
 			Type:       "hysteria2",
 			Tag:        "proxy",
 			Server:     server,
 			ServerPort: req.Port,
-			Password:   req.Password,
+			Password:   password,
 			TLS: &OutboundTLS{
 				Enabled:    true,
 				ServerName: sni,
@@ -906,9 +915,13 @@ func (g *Generator) buildClientConfig(req *DeployRequest, insecure bool) (*Clien
 }
 
 func (g *Generator) buildHysteria2URI(req *DeployRequest, server, sni string, insecure bool) string {
+	password := req.Password
+	if password == "" {
+		password = req.UserID
+	}
 	u := url.URL{
 		Scheme: "hysteria2",
-		User:   url.User(req.Password),
+		User:   url.User(password),
 		Host:   fmt.Sprintf("%s:%d", server, req.Port),
 	}
 	q := u.Query()
