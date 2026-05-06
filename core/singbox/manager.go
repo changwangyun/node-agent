@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -368,4 +371,50 @@ func (m *Manager) setState(s ProcessState) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.state = s
+}
+
+func (m *Manager) GetVersion() (string, error) {
+	binary := m.cfg.SingBox.BinaryPath
+	if _, err := os.Stat(binary); err != nil {
+		return "", fmt.Errorf("sing-box binary not found: %s", binary)
+	}
+
+	out, err := exec.Command(binary, "version").Output()
+	if err != nil {
+		return "", fmt.Errorf("get version: %w", err)
+	}
+
+	versionLine := strings.TrimSpace(string(out))
+	re := regexp.MustCompile(`sing-box\s+(\d+)\.(\d+)\.(\d+)`)
+	matches := re.FindStringSubmatch(versionLine)
+	if len(matches) < 4 {
+		return versionLine, nil
+	}
+
+	return fmt.Sprintf("%s.%s.%s", matches[1], matches[2], matches[3]), nil
+}
+
+func (m *Manager) VersionAtLeast(major, minor, patch int) (bool, error) {
+	ver, err := m.GetVersion()
+	if err != nil {
+		return false, err
+	}
+
+	re := regexp.MustCompile(`(\d+)\.(\d+)\.(\d+)`)
+	matches := re.FindStringSubmatch(ver)
+	if len(matches) < 4 {
+		return false, fmt.Errorf("parse version: %s", ver)
+	}
+
+	vMajor, _ := strconv.Atoi(matches[1])
+	vMinor, _ := strconv.Atoi(matches[2])
+	vPatch, _ := strconv.Atoi(matches[3])
+
+	if vMajor != major {
+		return vMajor > major, nil
+	}
+	if vMinor != minor {
+		return vMinor > minor, nil
+	}
+	return vPatch >= patch, nil
 }

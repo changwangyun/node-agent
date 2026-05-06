@@ -47,6 +47,14 @@ func main() {
 	generator.SetClashAPI(cfg.SingBox.ClashAPIAddr, cfg.SingBox.ClashAPISecret)
 	generator.SetV2RayAPI(cfg.SingBox.V2RayAPIAddr)
 
+	sbVer, err := mgr.GetVersion()
+	if err != nil {
+		log.Printf("[main] failed to get sing-box version: %v", err)
+	} else {
+		log.Printf("[main] sing-box version: %s", sbVer)
+		generator.SetSingboxVersion(sbVer)
+	}
+
 	singboxCollector := stats.NewSingBoxStatsCollector(cfg.SingBox.ClashAPIAddr, cfg.SingBox.ClashAPISecret)
 	fallbackCollector := stats.NewFallbackCollector()
 	multiCollector := stats.NewMultiCollector(singboxCollector, fallbackCollector)
@@ -151,19 +159,54 @@ func startWatchdog(mgr *singbox.Manager, cfg *config.Config) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
+	crashCount := 0
 	for range ticker.C {
 		if !mgr.IsRunning() && mgr.ConfigExists() {
 			state := mgr.GetState()
 			if state == singbox.StateCrashed {
-				log.Println("[watchdog] sing-box crashed, attempting restart...")
+				crashCount++
+				log.Printf("[watchdog] sing-box crashed (crash #%d), attempting restart...", crashCount)
+
+				errMsg := mgr.GetLastError()
+				if crashCount >= 3 && containsUnsupportedField(errMsg) {
+					log.Printf("[watchdog] sing-box version may be too old for current config features")
+					log.Printf("[watchdog] please upgrade sing-box to >= v1.10.0: https://github.com/SagerNet/sing-box/releases")
+					log.Printf("[watchdog] or run: curl -fsSL https://raw.githubusercontent.com/changwangyun/node-agent/main/deploy/install.sh | bash")
+					crashCount = 0
+					time.Sleep(30 * time.Second)
+					continue
+				}
+
 				if err := mgr.Start(); err != nil {
 					log.Printf("[watchdog] restart failed: %v", err)
 				} else {
 					log.Println("[watchdog] sing-box restarted successfully")
+					crashCount = 0
 				}
 			}
+		} else {
+			crashCount = 0
 		}
 	}
+}
+
+func containsUnsupportedField(errMsg string) bool {
+	return contains(errMsg, "initial_packet_size") ||
+		contains(errMsg, "bbr_profile") ||
+		contains(errMsg, "disable_path_mtu_discovery")
+}
+
+func contains(s, substr string) bool {
+	return len(s) > 0 && len(substr) > 0 && len(s) >= len(substr) && searchSubstring(s, substr)
+}
+
+func searchSubstring(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
 }
 
 func withMethods(h http.HandlerFunc, methods ...string) http.HandlerFunc {

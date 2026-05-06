@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"sync"
 )
 
@@ -220,6 +222,7 @@ type Generator struct {
 	clashAPIAddr   string
 	clashAPISecret string
 	v2rayAPIAddr   string
+	singboxVersion string
 }
 
 func NewGenerator(cfgPath string) *Generator {
@@ -239,6 +242,30 @@ func (g *Generator) SetClashAPI(addr, secret string) {
 
 func (g *Generator) SetV2RayAPI(addr string) {
 	g.v2rayAPIAddr = addr
+}
+
+func (g *Generator) SetSingboxVersion(ver string) {
+	g.singboxVersion = ver
+}
+
+func (g *Generator) supportsInitialPacketSize() bool {
+	if g.singboxVersion == "" {
+		return true
+	}
+	re := regexp.MustCompile(`(\d+)\.(\d+)\.(\d+)`)
+	matches := re.FindStringSubmatch(g.singboxVersion)
+	if len(matches) < 4 {
+		return true
+	}
+	major, _ := strconv.Atoi(matches[1])
+	minor, _ := strconv.Atoi(matches[2])
+	if major > 1 {
+		return true
+	}
+	if major == 1 && minor >= 10 {
+		return true
+	}
+	return false
 }
 
 func (g *Generator) GenerateAndWrite(req *DeployRequest) (*ClientConfigResult, error) {
@@ -539,14 +566,17 @@ func (g *Generator) generateHysteria2Inbound(req *DeployRequest, certPath, keyPa
 	}
 
 	inbound := &Inbound{
-		Type:              "hysteria2",
-		Tag:               "hysteria2-in",
-		Listen:            "0.0.0.0",
-		ListenPort:        req.Port,
-		Users:             []InboundUser{{Name: req.UserID, Password: req.Password}},
-		InitialPacketSize: 1400,
-		Masquerade:        "https://www.bing.com",
-		TLS:               &InboundTLS{Enabled: true, ServerName: sni, ALPN: []string{"h3"}},
+		Type:       "hysteria2",
+		Tag:        "hysteria2-in",
+		Listen:     "0.0.0.0",
+		ListenPort: req.Port,
+		Users:      []InboundUser{{Name: req.UserID, Password: req.Password}},
+		Masquerade: "https://www.bing.com",
+		TLS:        &InboundTLS{Enabled: true, ServerName: sni, ALPN: []string{"h3"}},
+	}
+
+	if g.supportsInitialPacketSize() {
+		inbound.InitialPacketSize = 1400
 	}
 
 	if useACME && req.ACMEDomain != "" {

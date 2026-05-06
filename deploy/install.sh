@@ -209,16 +209,36 @@ install_binary() {
 }
 
 install_singbox() {
+    local need_upgrade=false
+
     if command -v sing-box &>/dev/null; then
-        if sing-box version 2>/dev/null | grep -q "with_v2ray_api" && sing-box version 2>/dev/null | grep -q "with_quic" && sing-box version 2>/dev/null | grep -q "with_clash_api"; then
-            ok "sing-box 已安装(含 v2ray_api + quic + clash_api): $(sing-box version 2>/dev/null | head -1)"
-            return 0
+        local current_ver
+        current_ver=$(sing-box version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+        if [ -n "$current_ver" ]; then
+            local major minor
+            major=$(echo "$current_ver" | cut -d. -f1)
+            minor=$(echo "$current_ver" | cut -d. -f2)
+            if [ "$major" -lt 1 ] || { [ "$major" -eq 1 ] && [ "$minor" -lt 10 ]; }; then
+                warn "sing-box 版本过低 ($current_ver)，需要 >= v1.10.0 以支持性能优化特性"
+                need_upgrade=true
+            elif sing-box version 2>/dev/null | grep -q "with_v2ray_api" && sing-box version 2>/dev/null | grep -q "with_quic" && sing-box version 2>/dev/null | grep -q "with_clash_api"; then
+                ok "sing-box 已安装(含 v2ray_api + quic + clash_api): $(sing-box version 2>/dev/null | head -1)"
+                return 0
+            else
+                warn "当前 sing-box 缺少必要编译标签，需要重新编译以支持按用户流量统计、Hysteria2 和 Clash API"
+                need_upgrade=true
+            fi
         else
-            warn "当前 sing-box 缺少必要编译标签，需要重新编译以支持按用户流量统计、Hysteria2 和 Clash API"
+            warn "无法检测 sing-box 版本"
+            need_upgrade=true
         fi
+    else
+        need_upgrade=true
     fi
 
-    info "从源码编译 sing-box (含 with_v2ray_api,with_quic,with_clash_api 标签)..."
+    if [ "$need_upgrade" = true ]; then
+        info "从源码编译 sing-box (含 with_v2ray_api,with_quic,with_clash_api 标签)..."
+    fi
 
     if ! command -v go &>/dev/null; then
         info "安装 Go 编译环境..."
