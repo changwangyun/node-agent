@@ -249,13 +249,13 @@ func (g *Generator) SetSingboxVersion(ver string) {
 }
 
 func (g *Generator) supportsInitialPacketSize() bool {
-	if g.singboxVersion == "" {
-		return true
+	if g.singboxVersion == "" || g.singboxVersion == "unknown" {
+		return false
 	}
 	re := regexp.MustCompile(`(\d+)\.(\d+)\.(\d+)`)
 	matches := re.FindStringSubmatch(g.singboxVersion)
 	if len(matches) < 4 {
-		return true
+		return false
 	}
 	major, _ := strconv.Atoi(matches[1])
 	minor, _ := strconv.Atoi(matches[2])

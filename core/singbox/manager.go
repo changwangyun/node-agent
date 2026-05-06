@@ -411,13 +411,13 @@ func (m *Manager) VersionAtLeast(major, minor, patch int) (bool, error) {
 	}
 
 	if ver == "unknown" {
-		return true, nil
+		return false, nil
 	}
 
 	re := regexp.MustCompile(`(\d+)\.(\d+)\.(\d+)`)
 	matches := re.FindStringSubmatch(ver)
 	if len(matches) < 4 {
-		return true, nil
+		return false, nil
 	}
 
 	vMajor, _ := strconv.Atoi(matches[1])
