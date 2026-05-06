@@ -262,7 +262,7 @@ func (g *Generator) supportsInitialPacketSize() bool {
 	if major > 1 {
 		return true
 	}
-	if major == 1 && minor >= 10 {
+	if major == 1 && minor >= 14 {
 		return true
 	}
 	return false
