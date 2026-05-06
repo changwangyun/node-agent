@@ -117,6 +117,10 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("parse config file: %w", err)
 	}
 
+	if cfg.ControlPlane.Token == "" {
+		cfg.ControlPlane.Token = cfg.APIToken
+	}
+
 	globalCfg = cfg
 	return cfg, nil
 }
@@ -135,6 +139,10 @@ func Set(cfg *Config) {
 func (c *Config) Save(path string) error {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
+
+	if c.ControlPlane.Token == "" {
+		c.ControlPlane.Token = c.APIToken
+	}
 
 	data, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {

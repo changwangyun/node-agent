@@ -47,19 +47,19 @@ type Manager struct {
 	cfg       *config.Config
 	hasConfig bool
 
-	startTime   time.Time
-	crashCh     chan struct{}
-	lastError   string
-	crashTime   time.Time
-	logBuffer   *RingBuffer
+	startTime time.Time
+	crashCh   chan struct{}
+	lastError string
+	crashTime time.Time
+	logBuffer *RingBuffer
 }
 
 type RingBuffer struct {
-	mu     sync.RWMutex
-	lines  []string
-	size   int
-	head   int
-	count  int
+	mu    sync.RWMutex
+	lines []string
+	size  int
+	head  int
+	count int
 }
 
 func NewRingBuffer(size int) *RingBuffer {
@@ -167,9 +167,9 @@ func (m *Manager) Start() error {
 }
 
 type logWriter struct {
-	prefix    string
-	buf       *RingBuffer
-	fallback  *os.File
+	prefix     string
+	buf        *RingBuffer
+	fallback   *os.File
 	captureErr *bytes.Buffer
 }
 

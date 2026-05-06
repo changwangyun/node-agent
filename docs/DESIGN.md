@@ -1653,7 +1653,7 @@ PUT  /api/v1/user/push-token
 ### 7.4 节点接口
 
 ```
-GET  /api/v1/nodes
+GET  /api/nodes
   响应: {
     nodes: [
       {
@@ -1666,10 +1666,10 @@ GET  /api/v1/nodes
     ]
   }
 
-GET  /api/v1/nodes/recommended
+GET  /api/nodes/recommended
   响应: { nodes: [...top3] }
 
-POST /api/v1/nodes/{id}/latency
+POST /api/nodes/{id}/latency
   请求: { latency_ms }
   说明: 客户端上报测速结果
 ```
