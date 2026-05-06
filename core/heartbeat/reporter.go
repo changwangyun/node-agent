@@ -38,9 +38,18 @@ type TrafficReport struct {
 }
 
 type OnlineReport struct {
-	UserCount      int `json:"user_count"`
-	DeviceCount    int `json:"device_count"`
-	ActiveSessions int `json:"active_sessions"`
+	UserCount      int              `json:"user_count"`
+	DeviceCount    int              `json:"device_count"`
+	ActiveSessions int              `json:"active_sessions"`
+	OnlineUsers    []OnlineUserInfo `json:"online_users,omitempty"`
+}
+
+type OnlineUserInfo struct {
+	UserID   string `json:"user_id"`
+	Inbound  string `json:"inbound"`
+	IP       string `json:"ip"`
+	Upload   int64  `json:"upload"`
+	Download int64  `json:"download"`
 }
 
 type SystemReport struct {
@@ -215,13 +224,16 @@ func (r *Reporter) buildPayload() *HeartbeatPayload {
 	}
 
 	var onlineUserCount int
+	var onlineUsers []*stats.OnlineUser
 	if mc, ok := r.collector.(*stats.MultiCollector); ok {
 		if users, err := mc.GetOnlineUsers(); err == nil && len(users) > 0 {
 			onlineUserCount = len(users)
+			onlineUsers = users
 		}
 	} else if sc, ok := r.collector.(*stats.SingBoxStatsCollector); ok {
 		if users, err := sc.GetOnlineUsers(); err == nil && len(users) > 0 {
 			onlineUserCount = len(users)
+			onlineUsers = users
 		}
 	}
 
@@ -230,10 +242,22 @@ func (r *Reporter) buildPayload() *HeartbeatPayload {
 		onlineUserCount = limiterCount
 	}
 
+	var onlineUserInfos []OnlineUserInfo
+	for _, u := range onlineUsers {
+		onlineUserInfos = append(onlineUserInfos, OnlineUserInfo{
+			UserID:   u.UserID,
+			Inbound:  u.Inbound,
+			IP:       u.IP,
+			Upload:   u.Upload,
+			Download: u.Download,
+		})
+	}
+
 	onlineReport := OnlineReport{
 		UserCount:      onlineUserCount,
 		DeviceCount:    r.limiter.GetTotalDeviceCount(),
 		ActiveSessions: onlineUserCount,
+		OnlineUsers:    onlineUserInfos,
 	}
 
 	cpuPercent, _ := utils.GetCPUUsage()
