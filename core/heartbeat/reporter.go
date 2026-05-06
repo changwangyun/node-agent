@@ -206,26 +206,34 @@ func (r *Reporter) buildPayload() *HeartbeatPayload {
 	pid := r.mgr.GetPID()
 
 	var trafficReport TrafficReport
-	var onlineUserCount int
 	statsResult, err := r.collector.GetStats()
 	if err == nil && statsResult != nil {
 		trafficReport = TrafficReport{
 			Upload:   statsResult.Traffic.Upload,
 			Download: statsResult.Traffic.Download,
 		}
-		if len(statsResult.OnlineUsers) > 0 {
-			onlineUserCount = len(statsResult.OnlineUsers)
+	}
+
+	var onlineUserCount int
+	if mc, ok := r.collector.(*stats.MultiCollector); ok {
+		if users, err := mc.GetOnlineUsers(); err == nil && len(users) > 0 {
+			onlineUserCount = len(users)
+		}
+	} else if sc, ok := r.collector.(*stats.SingBoxStatsCollector); ok {
+		if users, err := sc.GetOnlineUsers(); err == nil && len(users) > 0 {
+			onlineUserCount = len(users)
 		}
 	}
 
-	onlineReport := OnlineReport{
-		UserCount:      r.limiter.GetOnlineUserCount(),
-		DeviceCount:    r.limiter.GetTotalDeviceCount(),
-		ActiveSessions: r.limiter.GetOnlineUserCount(),
+	limiterCount := r.limiter.GetOnlineUserCount()
+	if onlineUserCount == 0 && limiterCount > 0 {
+		onlineUserCount = limiterCount
 	}
 
-	if onlineUserCount > 0 {
-		onlineReport.UserCount = onlineUserCount
+	onlineReport := OnlineReport{
+		UserCount:      onlineUserCount,
+		DeviceCount:    r.limiter.GetTotalDeviceCount(),
+		ActiveSessions: onlineUserCount,
 	}
 
 	cpuPercent, _ := utils.GetCPUUsage()
