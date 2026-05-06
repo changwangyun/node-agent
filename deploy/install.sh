@@ -260,7 +260,7 @@ install_singbox() {
 
     local sb_ver
     sb_ver=$(curl -fsSL https://api.github.com/repos/SagerNet/sing-box/releases/latest | grep '"tag_name"' | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
-    if [ -z "$sb_ver" ]; then sb_ver="v1.12.0"; fi
+    if [ -z "$sb_ver" ]; then sb_ver="v1.14.0"; fi
 
     info "编译 sing-box ${sb_ver} (with_v2ray_api,with_quic,with_clash_api)..."
     local tmpdir
