@@ -1,7 +1,7 @@
 # Node Agent — VPN 节点控制系统技术文档
 
-> 版本：1.10.0  
-> 最后更新：2026-04-30
+> 版本：1.13.0  
+> 最后更新：2026-05-06
 
 ---
 
@@ -953,9 +953,20 @@ ReleaseSession(userID)
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `user_count` | int | 在线用户数（优先从 Clash API `/connections` 获取，不可用时回退到 DeviceLimiter 计数） |
+| `user_count` | int | 在线用户数（从 Clash API `/connections` 获取，不可用时回退到 DeviceLimiter 计数） |
 | `device_count` | int | 总设备数 |
 | `active_sessions` | int | 活跃会话数 |
+| `online_users` | array | 在线用户详情列表（v1.13.0 新增） |
+
+**online_users 数组元素**：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `user_id` | string | 用户唯一标识（UUID） |
+| `inbound` | string | 入站标签（如 `hysteria2-in`、`vless-in`） |
+| `ip` | string | 用户来源 IP |
+| `upload` | int64 | 该用户上传字节数 |
+| `download` | int64 | 该用户下载字节数 |
 
 **系统信息**：
 
@@ -1423,7 +1434,23 @@ Node Agent 使用 Clash API 和 V2Ray API 双数据源检测在线用户，自�
   "online": {
     "user_count": 15,
     "device_count": 38,
-    "active_sessions": 15
+    "active_sessions": 15,
+    "online_users": [
+      {
+        "user_id": "fc977ae4-1234-5678-abcd-ef0123456789",
+        "inbound": "hysteria2-in",
+        "ip": "1.2.3.4",
+        "upload": 102400,
+        "download": 204800
+      },
+      {
+        "user_id": "a1b2c3d4-5678-9abc-def0-123456789abc",
+        "inbound": "vless-in",
+        "ip": "5.6.7.8",
+        "upload": 51200,
+        "download": 102400
+      }
+    ]
   },
   "system": {
     "cpu_percent": 15.3,
@@ -2626,7 +2653,7 @@ public function deployToNode($node, $user, $protocol)
 | 表名 | 用途 | 关键字段 |
 |------|------|----------|
 | `users` | 用户账户 | `uuid`(用户唯一标识), `status`, `traffic_used/limit`, `speed_limit`, `device_limit` |
-| `user_devices` | 设备绑定 | `user_id`, `device_id`, `platform`, `last_online_at` |
+| `user_devices` | 设备绑定 | `user_id`, `node_id`, `device_id`, `ip`, `inbound`, `platform`, `last_online_at` |
 | `nodes` | 节点信息 | `code`(节点编码), `api_url`, `api_token`, `password_secret`, `status`, `current_users` |
 | `node_protocols` | 节点协议配置 | `node_id`, `protocol`, `port`, `config`(JSON), `is_default` |
 | `plans` | 套餐定义 | `price_monthly/quarterly/yearly`, `traffic_limit`, `speed_limit`, `device_limit` |
@@ -2834,6 +2861,23 @@ class NodeHeartbeatController extends Controller
             'download_speed' => $payload['traffic']['download'] ?? 0,
             'singbox_running' => $payload['status']['singbox_running'] ?? false,
         ]);
+
+        // 处理在线用户详情
+        if (!empty($payload['online']['online_users'])) {
+            foreach ($payload['online']['online_users'] as $onlineUser) {
+                UserDevice::updateOrCreate(
+                    [
+                        'user_id'  => $onlineUser['user_id'],
+                        'node_id'  => $node->id,
+                    ],
+                    [
+                        'ip'            => $onlineUser['ip'] ?? '',
+                        'inbound'       => $onlineUser['inbound'] ?? '',
+                        'last_online_at' => now(),
+                    ]
+                );
+            }
+        }
 
         return response()->json(['success' => true]);
     }
@@ -3615,10 +3659,35 @@ object ConfigBuilder {
 | 心跳重试 | 指数退避（最多 3 次） | 应对控制面临时不可用 | 增加心跳延迟（最坏情况 +7s） |
 | 流量持久化 | 每 30s 写入磁盘 | 重启后恢复累计流量 | 最多丢失 30s 数据 |
 | Trojan 传输 | 可选 WebSocket | 支持 CDN 中转和穿越 HTTP 代理 | WS 传输性能低于直连 |
+| 心跳在线用户 | Clash API 直取 | 不依赖面板调用 /device/register，直接从 sing-box 获取真实连接 | 需要启用 Clash API |
+| 心跳用户详情 | 包含在心跳 payload | Laravel 面板无需额外调用 /online 接口即可获取在线设备 | 心跳 payload 略大 |
 
 ---
 
 ## 15. 版本变更记录
+
+### v1.13.0 (2026-05-06)
+
+**新功能**：
+
+- **心跳上报在线用户详情**：心跳 payload 的 `online` 字段新增 `online_users` 数组，包含每个在线用户的 `user_id`、`inbound`、`ip`、`upload`、`download`，Laravel 面板可直接从心跳获取在线设备信息
+- **在线用户数从 Clash API 获取**：心跳的 `user_count` 不再依赖 DeviceLimiter 的 sessions（需要面板调用 `/device/register`），改为直接从 Clash API `/connections` 获取真实在线用户数
+
+**修复**：
+
+- **Hysteria2 密码为空**：当 Laravel 面板未传递 `password` 参数时，自动使用 `user_id` 作为 fallback 密码，避免认证失败
+- **sing-box 版本兼容性**：`initial_packet_size` 字段仅在 sing-box >= 1.14.0 时生成（之前误判为 >= 1.10.0），避免旧版 sing-box 配置解析失败
+- **版本未知时保守策略**：当 sing-box 版本为 "unknown" 时，`VersionAtLeast()` 和 `supportsInitialPacketSize()` 返回 `false`，不生成可能不兼容的配置字段
+- **安装脚本自动安装 git**：编译 sing-box 前自动检测并安装 git（支持 apt/yum/apk）
+- **sing-box 编译嵌入版本信息**：`go install` 添加 `-ldflags` 注入版本号，解决 `sing-box version unknown` 问题
+- **Token 自动同步**：`control_plane.token` 为空时自动从 `api_token` 同步，减少手动配置
+
+### v1.12.0 (2026-05-06)
+
+**修复**：
+
+- **心跳 401 错误**：区分 API Token（面板 → 节点）和 Control Plane Token（节点 → 面板），确保心跳使用正确的 Token
+- **心跳 404 错误**：默认心跳路径改为 `/api/v1/node/heartbeat`
 
 ### v1.11.0 (2026-04-30)
 
