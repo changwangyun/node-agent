@@ -240,6 +240,22 @@ install_singbox() {
         info "从源码编译 sing-box (含 with_v2ray_api,with_quic,with_clash_api 标签)..."
     fi
 
+    if ! command -v git &>/dev/null; then
+        info "安装 git..."
+        if command -v apt-get &>/dev/null; then
+            apt-get update -qq && apt-get install -y -qq git >/dev/null 2>&1
+        elif command -v yum &>/dev/null; then
+            yum install -y -q git >/dev/null 2>&1
+        elif command -v apk &>/dev/null; then
+            apk add --no-cache git >/dev/null 2>&1
+        else
+            warn "无法自动安装 git，请手动安装后重试"
+        fi
+        if command -v git &>/dev/null; then
+            ok "git 已安装"
+        fi
+    fi
+
     if ! command -v go &>/dev/null; then
         info "安装 Go 编译环境..."
         local go_ver
@@ -267,8 +283,8 @@ install_singbox() {
     tmpdir=$(mktemp -d)
     cd "${tmpdir}"
 
-    if ! go install -tags "with_v2ray_api,with_quic,with_clash_api" "github.com/sagernet/sing-box/cmd/sing-box@${sb_ver}"; then
-        warn "编译失败，尝试下载标准版(不含按用户流量统计、Hysteria2 和 Clash API)..."
+    if ! go install -ldflags "-X 'github.com/sagernet/sing-box/constant.Version=${sb_ver}'" -tags "with_v2ray_api,with_quic,with_clash_api" "github.com/sagernet/sing-box/cmd/sing-box@${sb_ver}"; then
+        warn "编译失败，尝试下载预编译版本..."
         local pkg2
         case "$(uname -m)" in
             x86_64|amd64)   pkg2="amd64" ;;
@@ -277,15 +293,18 @@ install_singbox() {
             *)              pkg2="amd64" ;;
         esac
         local sb_url="https://github.com/SagerNet/sing-box/releases/download/${sb_ver}/sing-box-${sb_ver#v}-linux-${pkg2}.tar.gz"
-        if curl -fsSL --progress-bar -o "${tmpdir}/sing-box.tar.gz" "$sb_url"; then
+        info "下载: $sb_url"
+        if curl -fsSL --connect-timeout 10 --progress-bar -o "${tmpdir}/sing-box.tar.gz" "$sb_url"; then
             tar xzf "${tmpdir}/sing-box.tar.gz" -C "${tmpdir}"
             local sb_bin
             sb_bin=$(find "${tmpdir}" -name "sing-box" -type f | head -1)
             if [ -n "$sb_bin" ]; then
                 cp "$sb_bin" "${INSTALL_DIR}/sing-box"
                 chmod +x "${INSTALL_DIR}/sing-box"
-                warn "sing-box 已安装(标准版，不含按用户流量统计、Hysteria2 和 Clash API)"
+                ok "sing-box 已安装(预编译版)"
             fi
+        else
+            warn "下载预编译版本失败，请检查网络连接或手动安装 sing-box"
         fi
     else
         cp "$(go env GOPATH)/bin/sing-box" "${INSTALL_DIR}/sing-box"
