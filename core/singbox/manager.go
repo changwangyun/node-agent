@@ -384,14 +384,24 @@ func (m *Manager) GetVersion() (string, error) {
 		return "", fmt.Errorf("get version: %w", err)
 	}
 
-	versionLine := strings.TrimSpace(string(out))
-	re := regexp.MustCompile(`sing-box\s+(\d+)\.(\d+)\.(\d+)`)
-	matches := re.FindStringSubmatch(versionLine)
-	if len(matches) < 4 {
-		return versionLine, nil
+	versionOutput := strings.TrimSpace(string(out))
+	re := regexp.MustCompile(`sing-box version ([\d.]+)`)
+	matches := re.FindStringSubmatch(versionOutput)
+	if len(matches) >= 2 {
+		return matches[1], nil
 	}
 
-	return fmt.Sprintf("%s.%s.%s", matches[1], matches[2], matches[3]), nil
+	re2 := regexp.MustCompile(`([\d]+\.[\d]+\.[\d]+)`)
+	matches2 := re2.FindStringSubmatch(versionOutput)
+	if len(matches2) >= 2 {
+		return matches2[1], nil
+	}
+
+	if strings.Contains(strings.ToLower(versionOutput), "unknown") {
+		return "unknown", nil
+	}
+
+	return versionOutput, nil
 }
 
 func (m *Manager) VersionAtLeast(major, minor, patch int) (bool, error) {
@@ -400,10 +410,14 @@ func (m *Manager) VersionAtLeast(major, minor, patch int) (bool, error) {
 		return false, err
 	}
 
+	if ver == "unknown" {
+		return true, nil
+	}
+
 	re := regexp.MustCompile(`(\d+)\.(\d+)\.(\d+)`)
 	matches := re.FindStringSubmatch(ver)
 	if len(matches) < 4 {
-		return false, fmt.Errorf("parse version: %s", ver)
+		return true, nil
 	}
 
 	vMajor, _ := strconv.Atoi(matches[1])
