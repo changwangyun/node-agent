@@ -771,22 +771,158 @@ do_install() {
 }
 
 do_uninstall() {
-    banner
-    check_root
+    local purge=false
+    local force=false
 
-    info "停止服务..."
-    systemctl stop ${BINARY} 2>/dev/null || true
-    systemctl disable ${BINARY} 2>/dev/null || true
-
-    info "删除文件..."
-    rm -f "${INSTALL_DIR}/${BINARY}"
-    rm -f /etc/systemd/system/${BINARY}.service
-    systemctl daemon-reload
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --purge) purge=true ;;
+            --force|-y) force=true ;;
+        esac
+        shift
+    done
 
     echo ""
-    ok "Node Agent 已卸载"
-    warn "配置和数据目录保留: ${CONFIG_DIR} ${DATA_DIR}"
-    warn "如需彻底删除: rm -rf ${CONFIG_DIR} ${DATA_DIR} ${LOG_DIR}"
+    echo -e "${RED}╔══════════════════════════════════════════╗${NC}"
+    echo -e "${RED}║${NC}       ⚠️  Node Agent 卸载脚本           ${RED}║${NC}"
+    echo -e "${RED}╚══════════════════════════════════════════╝${NC}"
+    echo ""
+
+    check_root
+
+    if [ "$purge" = true ]; then
+        echo -e "  ${RED}完全卸载模式：将删除所有配置、数据和日志！${NC}"
+        echo ""
+    fi
+
+    if [ "$force" != true ]; then
+        echo -e "  ${YELLOW}将执行以下操作:${NC}"
+        echo "  - 停止并禁用 node-agent 服务"
+        echo "  - 删除二进制文件: ${INSTALL_DIR}/${BINARY}"
+        echo "  - 删除 systemd 服务文件"
+        if [ "$purge" = true ]; then
+            echo "  - 删除配置目录: ${CONFIG_DIR}"
+            echo "  - 删除数据目录: ${DATA_DIR}"
+            echo "  - 删除日志目录: ${LOG_DIR}"
+            echo "  - 删除 sing-box 配置: ${SINGBOX_DIR}"
+            echo "  - 删除系统优化配置: /etc/sysctl.d/99-node-agent.conf"
+        fi
+        echo ""
+        read -rp "  确认卸载? [y/N]: " confirm
+        if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
+            info "已取消卸载"
+            exit 0
+        fi
+    fi
+
+    echo ""
+    info "===== 停止服务 ====="
+    if systemctl is-active --quiet ${BINARY} 2>/dev/null; then
+        systemctl stop ${BINARY} 2>/dev/null || true
+        sleep 1
+        ok "node-agent 服务已停止"
+    else
+        info "node-agent 服务未运行"
+    fi
+
+    if systemctl is-enabled --quiet ${BINARY} 2>/dev/null; then
+        systemctl disable ${BINARY} 2>/dev/null || true
+        ok "node-agent 服务已禁用"
+    fi
+
+    echo ""
+    info "===== 删除二进制文件 ====="
+    if [ -f "${INSTALL_DIR}/${BINARY}" ]; then
+        rm -f "${INSTALL_DIR}/${BINARY}"
+        ok "已删除: ${INSTALL_DIR}/${BINARY}"
+    else
+        info "二进制文件不存在，跳过"
+    fi
+
+    echo ""
+    info "===== 删除 systemd 服务 ====="
+    if [ -f "/etc/systemd/system/${BINARY}.service" ]; then
+        rm -f "/etc/systemd/system/${BINARY}.service"
+        systemctl daemon-reload
+        ok "已删除: /etc/systemd/system/${BINARY}.service"
+    else
+        info "服务文件不存在，跳过"
+    fi
+
+    if [ "$purge" = true ]; then
+        echo ""
+        info "===== 删除配置目录 ====="
+        if [ -d "${CONFIG_DIR}" ]; then
+            rm -rf "${CONFIG_DIR}"
+            ok "已删除: ${CONFIG_DIR}"
+        else
+            info "配置目录不存在，跳过"
+        fi
+
+        echo ""
+        info "===== 删除数据目录 ====="
+        if [ -d "${DATA_DIR}" ]; then
+            rm -rf "${DATA_DIR}"
+            ok "已删除: ${DATA_DIR}"
+        else
+            info "数据目录不存在，跳过"
+        fi
+
+        echo ""
+        info "===== 删除日志目录 ====="
+        if [ -d "${LOG_DIR}" ]; then
+            rm -rf "${LOG_DIR}"
+            ok "已删除: ${LOG_DIR}"
+        else
+            info "日志目录不存在，跳过"
+        fi
+
+        echo ""
+        info "===== 删除 sing-box 配置 ====="
+        if [ -d "${SINGBOX_DIR}" ]; then
+            rm -rf "${SINGBOX_DIR}"
+            ok "已删除: ${SINGBOX_DIR}"
+        else
+            info "sing-box 配置目录不存在，跳过"
+        fi
+
+        echo ""
+        info "===== 删除系统优化配置 ====="
+        if [ -f "/etc/sysctl.d/99-node-agent.conf" ]; then
+            rm -f "/etc/sysctl.d/99-node-agent.conf"
+            ok "已删除: /etc/sysctl.d/99-node-agent.conf"
+        else
+            info "系统优化配置不存在，跳过"
+        fi
+
+        if [ -f "/etc/modules-load.d/node-agent.conf" ]; then
+            rm -f "/etc/modules-load.d/node-agent.conf"
+            ok "已删除: /etc/modules-load.d/node-agent.conf"
+        fi
+    fi
+
+    echo ""
+    echo -e "${GREEN}╔══════════════════════════════════════════╗${NC}"
+    echo -e "${GREEN}║${NC}        ✅ Node Agent 已完全卸载         ${GREEN}║${NC}"
+    echo -e "${GREEN}╚══════════════════════════════════════════╝${NC}"
+    echo ""
+
+    if [ "$purge" != true ]; then
+        warn "以下目录已保留 (使用 --purge 彻底删除):"
+        echo "  ${CONFIG_DIR}"
+        echo "  ${DATA_DIR}"
+        echo "  ${LOG_DIR}"
+        echo "  ${SINGBOX_DIR}"
+        echo ""
+        echo -e "  ${YELLOW}手动彻底清理:${NC}"
+        echo "    rm -rf ${CONFIG_DIR} ${DATA_DIR} ${LOG_DIR} ${SINGBOX_DIR}"
+        echo "    rm -f /etc/sysctl.d/99-node-agent.conf"
+        echo ""
+    fi
+
+    warn "sing-box 二进制未删除 (可能被其他服务使用)"
+    echo "  如需删除: rm -f /usr/local/bin/sing-box"
+    echo ""
 }
 
 show_usage() {
@@ -797,12 +933,16 @@ show_usage() {
     echo ""
     echo "命令:"
     echo "  install     安装 (默认)"
-    echo "  uninstall   卸载"
+    echo "  uninstall   卸载 (保留配置和数据)"
     echo ""
     echo "安装选项:"
     echo "  --local     使用本地二进制 (当前目录或 dist/ 目录)"
     echo "  --source    从源码编译安装 (自动安装 Go)"
     echo "  --github    从 GitHub Release 下载 (默认，失败回退源码编译)"
+    echo ""
+    echo "卸载选项:"
+    echo "  --purge     彻底删除所有配置、数据和日志"
+    echo "  --force,-y  跳过确认提示，直接执行"
     echo ""
     echo -e "${YELLOW}推荐部署方式:${NC}"
     echo ""
@@ -824,7 +964,8 @@ show_usage() {
 
 case "${1:-}" in
     uninstall|remove)
-        do_uninstall
+        shift
+        do_uninstall "$@"
         ;;
     install|"")
         shift 2>/dev/null || true
