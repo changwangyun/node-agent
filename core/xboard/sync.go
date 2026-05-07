@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -520,16 +521,15 @@ func (s *XboardSync) reportAlive() {
 	if mc, ok := s.collector.(*stats.MultiCollector); ok {
 		if users, err := mc.GetOnlineUsers(); err == nil {
 			for _, u := range users {
+				if strings.HasSuffix(u.UserID, "@prev") {
+					continue
+				}
 				aliveData[u.UserID]++
 				if u.IP != "" {
 					ipData[u.UserID] = append(ipData[u.UserID], u.IP)
 				}
 			}
 		}
-	}
-
-	if len(aliveData) == 0 {
-		aliveData[s.cfg.Xboard.NodeID.String()] = 1
 	}
 
 	payload := map[string]interface{}{
