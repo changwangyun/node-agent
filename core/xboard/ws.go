@@ -85,23 +85,20 @@ func (w *WSClient) Connect() error {
 		hs, err := w.doHandshake()
 		if err != nil {
 			if !w.notifiedOnce {
-				log.Printf("[xboard] WebSocket handshake failed: %v, using REST polling only", err)
+				log.Printf("[xboard] WebSocket handshake failed: %v, trying direct connection", err)
 				w.notifiedOnce = true
 			}
-			w.unsupported = true
-			return nil
-		}
-
-		if !hs.WebSocket.Enabled || hs.WebSocket.WsURL == "" {
+			w.wsURL = normalizeWSURL(w.apiHost)
+		} else if !hs.WebSocket.Enabled || hs.WebSocket.WsURL == "" {
 			if !w.notifiedOnce {
-				log.Printf("[xboard] WebSocket not enabled on panel, using REST polling only")
+				log.Printf("[xboard] WebSocket not enabled on panel, trying direct connection")
 				w.notifiedOnce = true
 			}
-			w.unsupported = true
-			return nil
+			w.wsURL = normalizeWSURL(w.apiHost)
+		} else {
+			w.wsURL = normalizeWSURL(hs.WebSocket.WsURL)
+			log.Printf("[xboard] WebSocket URL from handshake: %s", w.wsURL)
 		}
-
-		w.wsURL = normalizeWSURL(hs.WebSocket.WsURL)
 	}
 
 	header := http.Header{}
@@ -125,9 +122,29 @@ func (w *WSClient) Connect() error {
 				return nil
 			}
 		}
-		return fmt.Errorf("dial ws: %w", err)
+
+		fallbackURL := normalizeWSURL(w.apiHost)
+		if fallbackURL != w.wsURL {
+			log.Printf("[xboard] ws dial %s failed: %v, trying fallback %s", w.wsURL, err, fallbackURL)
+			conn2, resp2, err2 := dialer.Dial(fallbackURL, header)
+			if err2 == nil {
+				if resp2 != nil {
+					resp2.Body.Close()
+				}
+				w.wsURL = fallbackURL
+				conn = conn2
+				goto connected
+			}
+			if resp2 != nil {
+				resp2.Body.Close()
+			}
+			log.Printf("[xboard] ws fallback also failed: %v", err2)
+		}
+
+		return fmt.Errorf("dial ws %s: %w", w.wsURL, err)
 	}
 
+connected:
 	w.conn = conn
 	w.connected = true
 
