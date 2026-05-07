@@ -375,12 +375,7 @@ func (c *XboardClient) ReportUserTraffic(trafficData map[string][2]int64) error 
 	return c.doPost(url, trafficData)
 }
 
-func (c *XboardClient) ReportAlive(aliveData map[string]int) error {
-	url := c.buildURL("/alive")
-	return c.doPost(url, aliveData)
-}
-
-func (c *XboardClient) ReportAliveWithIPs(payload map[string]interface{}) error {
+func (c *XboardClient) ReportAliveWithIPs(payload interface{}) error {
 	url := c.buildURL("/alive")
 	return c.doPost(url, payload)
 }

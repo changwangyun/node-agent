@@ -34,8 +34,9 @@ type XboardSync struct {
 	stopCh chan struct{}
 	mu     sync.Mutex
 
-	lastUserMap  map[int]*UserInfo
-	lastNodeInfo *NodeInfo
+	lastUserMap   map[int]*UserInfo
+	lastNodeInfo  *NodeInfo
+	lastAliveUIDs map[string]bool
 
 	wsConnected bool
 }
@@ -515,8 +516,8 @@ func (s *XboardSync) mapNodeType(nodeType string) string {
 }
 
 func (s *XboardSync) reportAlive() {
-	aliveData := make(map[string]int)
 	ipData := make(map[string][]string)
+	currentUIDs := make(map[string]bool)
 
 	if mc, ok := s.collector.(*stats.MultiCollector); ok {
 		if users, err := mc.GetOnlineUsers(); err == nil {
@@ -524,7 +525,7 @@ func (s *XboardSync) reportAlive() {
 				if strings.HasSuffix(u.UserID, "@prev") {
 					continue
 				}
-				aliveData[u.UserID]++
+				currentUIDs[u.UserID] = true
 				if u.IP != "" {
 					ipData[u.UserID] = append(ipData[u.UserID], u.IP)
 				}
@@ -532,14 +533,15 @@ func (s *XboardSync) reportAlive() {
 		}
 	}
 
-	payload := map[string]interface{}{
-		"alive": aliveData,
-	}
-	if len(ipData) > 0 {
-		payload["ips"] = ipData
+	for uid := range s.lastAliveUIDs {
+		if !currentUIDs[uid] {
+			ipData[uid] = []string{}
+		}
 	}
 
-	if err := s.client.ReportAliveWithIPs(payload); err != nil {
+	s.lastAliveUIDs = currentUIDs
+
+	if err := s.client.ReportAliveWithIPs(ipData); err != nil {
 		log.Printf("[xboard] failed to report alive: %v", err)
 	}
 }
