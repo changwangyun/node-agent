@@ -485,7 +485,7 @@ install_config_xboard() {
   "xboard": {
     "api_host": "${xb_host}",
     "api_key": "${xb_key}",
-    "node_id": ${xb_node_id},
+    "node_id": "${xb_node_id}",
     "node_type": "${xb_node_type}",
     "sync_interval": ${xb_interval},
     "timeout": 30

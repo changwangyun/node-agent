@@ -14,7 +14,7 @@ import (
 type XboardClient struct {
 	apiHost  string
 	apiKey   string
-	nodeID   int
+	nodeID   string
 	nodeType string
 	timeout  time.Duration
 	client   *http.Client
@@ -23,7 +23,7 @@ type XboardClient struct {
 	etags map[string]string
 }
 
-func NewXboardClient(apiHost, apiKey string, nodeID int, nodeType string, timeout int) *XboardClient {
+func NewXboardClient(apiHost, apiKey string, nodeID string, nodeType string, timeout int) *XboardClient {
 	t := time.Duration(timeout) * time.Second
 	if t < 5*time.Second {
 		t = 30 * time.Second
@@ -42,7 +42,7 @@ func NewXboardClient(apiHost, apiKey string, nodeID int, nodeType string, timeou
 }
 
 func (c *XboardClient) buildURL(path string) string {
-	return fmt.Sprintf("%s/api/v1/server/UniProxy%s?node_id=%d&node_type=%s&token=%s",
+	return fmt.Sprintf("%s/api/v1/server/UniProxy%s?node_id=%s&node_type=%s&token=%s",
 		c.apiHost, path, c.nodeID, c.nodeType, c.apiKey)
 }
 

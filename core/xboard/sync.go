@@ -207,7 +207,7 @@ func (s *XboardSync) buildDeployRequest(u UserInfo, nodeInfo *NodeInfo) *configg
 
 	req := &configgen.DeployRequest{
 		UserID:   u.UUID,
-		NodeID:   fmt.Sprintf("%d", s.cfg.Xboard.NodeID),
+		NodeID:   s.cfg.Xboard.NodeID,
 		Protocol: s.mapNodeType(s.cfg.Xboard.NodeType),
 		Server:   nodeInfo.Host,
 		Port:     nodeInfo.Port,
@@ -371,7 +371,7 @@ func (s *XboardSync) mapNodeType(nodeType string) string {
 
 func (s *XboardSync) reportAlive() {
 	if err := s.client.ReportAlive(map[string]int{
-		fmt.Sprintf("%d", s.cfg.Xboard.NodeID): 1,
+		s.cfg.Xboard.NodeID: 1,
 	}); err != nil {
 		log.Printf("[xboard] failed to report alive: %v", err)
 	}
