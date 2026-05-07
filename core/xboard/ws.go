@@ -38,6 +38,9 @@ type WSClient struct {
 
 	reconnectDelay time.Duration
 	maxDelay       time.Duration
+
+	unsupported  bool
+	notifiedOnce bool
 }
 
 func NewWSClient(apiHost, apiKey, nodeID, nodeType string) *WSClient {
@@ -64,7 +67,7 @@ func (w *WSClient) Connect() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	if w.connected {
+	if w.connected || w.unsupported {
 		return nil
 	}
 
@@ -82,8 +85,20 @@ func (w *WSClient) Connect() error {
 		HandshakeTimeout: 10 * time.Second,
 	}
 
-	conn, _, err := dialer.Dial(wsURL, header)
+	conn, resp, err := dialer.Dial(wsURL, header)
 	if err != nil {
+		if resp != nil {
+			statusCode := resp.StatusCode
+			resp.Body.Close()
+			if statusCode == 404 || statusCode == 405 || statusCode == 501 {
+				w.unsupported = true
+				if !w.notifiedOnce {
+					log.Printf("[xboard] WebSocket not supported by panel (HTTP %d), using REST polling only", statusCode)
+					w.notifiedOnce = true
+				}
+				return nil
+			}
+		}
 		return fmt.Errorf("dial ws: %w", err)
 	}
 
@@ -237,7 +252,9 @@ func (w *WSClient) handleDisconnect() {
 		w.onDisconnected()
 	}
 
-	go w.reconnect()
+	if !w.unsupported {
+		go w.reconnect()
+	}
 }
 
 func (w *WSClient) reconnect() {
@@ -248,6 +265,10 @@ func (w *WSClient) reconnect() {
 		case <-w.stopCh:
 			return
 		case <-time.After(delay):
+		}
+
+		if w.unsupported {
+			return
 		}
 
 		log.Printf("[xboard-ws] reconnecting...")
