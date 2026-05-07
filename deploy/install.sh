@@ -358,15 +358,7 @@ install_config() {
         return 0
     fi
 
-    local node_id api_token panel_type
-
-    read -rp "请输入 Node ID [node-001]: " node_id
-    node_id="${node_id:-node-001}"
-
-    read -rp "请输入 API Token [自动生成]: " api_token
-    if [ -z "$api_token" ]; then
-        api_token=$(openssl rand -hex 16 2>/dev/null || cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "change-me-$(date +%s)")
-    fi
+    local node_id panel_type
 
     echo ""
     echo -e "  ${CYAN}请选择面板类型:${NC}"
@@ -375,17 +367,24 @@ install_config() {
     read -rp "  请选择 [1]: " panel_type
     panel_type="${panel_type:-1}"
 
+    read -rp "请输入 Node ID [node-001]: " node_id
+    node_id="${node_id:-node-001}"
+
     if [ "$panel_type" = "2" ]; then
-        install_config_xboard "$node_id" "$api_token"
+        install_config_xboard "$node_id"
     else
-        install_config_laravel "$node_id" "$api_token"
+        install_config_laravel "$node_id"
     fi
 }
 
 install_config_laravel() {
     local node_id="$1"
-    local api_token="$2"
-    local cp_url cp_token
+    local api_token cp_url cp_token
+
+    read -rp "请输入 API Token [自动生成]: " api_token
+    if [ -z "$api_token" ]; then
+        api_token=$(openssl rand -hex 16 2>/dev/null || cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "change-me-$(date +%s)")
+    fi
 
     read -rp "请输入控制面板 URL [http://127.0.0.1:8000]: " cp_url
     cp_url="${cp_url:-http://127.0.0.1:8000}"
@@ -430,7 +429,6 @@ EOF
 
 install_config_xboard() {
     local node_id="$1"
-    local api_token="$2"
     local xb_host xb_key xb_node_id xb_node_type xb_interval
 
     read -rp "请输入 Xboard 面板地址 (例: https://panel.example.com): " xb_host
@@ -464,11 +462,14 @@ install_config_xboard() {
     read -rp "请输入同步间隔（秒）[60]: " xb_interval
     xb_interval="${xb_interval:-60}"
 
+    local xb_api_token
+    xb_api_token=$(openssl rand -hex 16 2>/dev/null || echo "xboard-mode-$(date +%s)")
+
     cat > "${CONFIG_DIR}/config.json" << EOF
 {
   "node_id": "${node_id}",
   "api_port": 8080,
-  "api_token": "${api_token}",
+  "api_token": "${xb_api_token}",
   "log_level": "info",
   "data_dir": "/var/lib/node-agent",
   "panel_type": "xboard",
