@@ -126,10 +126,7 @@ func (c *XboardClient) GetNodeInfo() (*NodeInfo, error) {
 		return nil, fmt.Errorf("parse response: %w", err)
 	}
 
-	data, ok := raw["data"].(map[string]interface{})
-	if !ok {
-		return nil, fmt.Errorf("invalid response format: missing data field")
-	}
+	data := raw
 
 	nodeInfo := &NodeInfo{}
 
@@ -308,9 +305,9 @@ func (c *XboardClient) GetUserList() ([]UserInfo, error) {
 		return nil, fmt.Errorf("parse response: %w", err)
 	}
 
-	data, ok := raw["data"].([]interface{})
+	data, ok := raw["users"].([]interface{})
 	if !ok {
-		return nil, fmt.Errorf("invalid response format: missing data array")
+		return nil, fmt.Errorf("invalid response format: missing users array")
 	}
 
 	var users []UserInfo
