@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -100,7 +101,7 @@ func (w *WSClient) Connect() error {
 			return nil
 		}
 
-		w.wsURL = hs.WebSocket.WsURL
+		w.wsURL = normalizeWSURL(hs.WebSocket.WsURL)
 	}
 
 	header := http.Header{}
@@ -179,6 +180,16 @@ func (w *WSClient) doHandshake() (*HandshakeResponse, error) {
 	}
 
 	return &hs, nil
+}
+
+func normalizeWSURL(raw string) string {
+	s := strings.TrimRight(raw, "/")
+	if strings.HasPrefix(s, "https://") {
+		s = "wss://" + s[8:]
+	} else if strings.HasPrefix(s, "http://") {
+		s = "ws://" + s[7:]
+	}
+	return s
 }
 
 func (w *WSClient) Disconnect() {
