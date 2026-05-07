@@ -184,10 +184,14 @@ func (w *WSClient) doHandshake() (*HandshakeResponse, error) {
 
 func normalizeWSURL(raw string) string {
 	s := strings.TrimRight(raw, "/")
-	if strings.HasPrefix(s, "https://") {
+	switch {
+	case strings.HasPrefix(s, "https://"):
 		s = "wss://" + s[8:]
-	} else if strings.HasPrefix(s, "http://") {
+	case strings.HasPrefix(s, "http://"):
 		s = "ws://" + s[7:]
+	case strings.HasPrefix(s, "ws://"), strings.HasPrefix(s, "wss://"):
+	default:
+		s = "wss://" + s
 	}
 	return s
 }
