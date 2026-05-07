@@ -1,16 +1,24 @@
 package xboard
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
-	"net/url"
 	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
 )
+
+type HandshakeResponse struct {
+	WebSocket struct {
+		Enabled bool   `json:"enabled"`
+		WsURL   string `json:"ws_url"`
+	} `json:"websocket"`
+}
 
 type WSMessage struct {
 	Type string          `json:"type"`
@@ -41,6 +49,7 @@ type WSClient struct {
 
 	unsupported  bool
 	notifiedOnce bool
+	wsURL        string
 }
 
 func NewWSClient(apiHost, apiKey, nodeID, nodeType string) *WSClient {
@@ -71,21 +80,37 @@ func (w *WSClient) Connect() error {
 		return nil
 	}
 
-	wsURL, err := w.buildWSURL()
-	if err != nil {
-		return fmt.Errorf("build ws url: %w", err)
+	if w.wsURL == "" {
+		hs, err := w.doHandshake()
+		if err != nil {
+			if !w.notifiedOnce {
+				log.Printf("[xboard] WebSocket handshake failed: %v, using REST polling only", err)
+				w.notifiedOnce = true
+			}
+			w.unsupported = true
+			return nil
+		}
+
+		if !hs.WebSocket.Enabled || hs.WebSocket.WsURL == "" {
+			if !w.notifiedOnce {
+				log.Printf("[xboard] WebSocket not enabled on panel, using REST polling only")
+				w.notifiedOnce = true
+			}
+			w.unsupported = true
+			return nil
+		}
+
+		w.wsURL = hs.WebSocket.WsURL
 	}
 
 	header := http.Header{}
 	header.Set("Authorization", "Bearer "+w.apiKey)
-	header.Set("X-Node-ID", w.nodeID)
-	header.Set("X-Node-Type", w.nodeType)
 
 	dialer := websocket.Dialer{
 		HandshakeTimeout: 10 * time.Second,
 	}
 
-	conn, resp, err := dialer.Dial(wsURL, header)
+	conn, resp, err := dialer.Dial(w.wsURL, header)
 	if err != nil {
 		if resp != nil {
 			statusCode := resp.StatusCode
@@ -108,8 +133,52 @@ func (w *WSClient) Connect() error {
 	go w.readLoop()
 	go w.pingLoop()
 
-	log.Printf("[xboard-ws] connected to %s", wsURL)
+	log.Printf("[xboard-ws] connected to %s", w.wsURL)
 	return nil
+}
+
+func (w *WSClient) doHandshake() (*HandshakeResponse, error) {
+	handshakeURL := w.apiHost + "/api/v2/server/handshake"
+
+	payload := map[string]interface{}{
+		"token":     w.apiKey,
+		"node_id":   w.nodeID,
+		"node_type": w.nodeType,
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal handshake payload: %w", err)
+	}
+
+	req, err := http.NewRequest("POST", handshakeURL, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("create handshake request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("handshake request: %w", err)
+	}
+	defer func() {
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+	}()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return nil, fmt.Errorf("handshake status %d: %s", resp.StatusCode, respBody)
+	}
+
+	var hs HandshakeResponse
+	if err := json.NewDecoder(resp.Body).Decode(&hs); err != nil {
+		return nil, fmt.Errorf("decode handshake: %w", err)
+	}
+
+	return &hs, nil
 }
 
 func (w *WSClient) Disconnect() {
@@ -136,25 +205,6 @@ func (w *WSClient) IsConnected() bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.connected
-}
-
-func (w *WSClient) buildWSURL() (string, error) {
-	u, err := url.Parse(w.apiHost)
-	if err != nil {
-		return "", fmt.Errorf("parse api host: %w", err)
-	}
-
-	wsScheme := "ws"
-	if u.Scheme == "https" {
-		wsScheme = "wss"
-	}
-
-	wsURL := fmt.Sprintf("%s://%s/api/v2/server/handshake", wsScheme, u.Host)
-	if u.Path != "" && u.Path != "/" {
-		wsURL = fmt.Sprintf("%s://%s%s/api/v2/server/handshake", wsScheme, u.Host, u.Path)
-	}
-
-	return wsURL, nil
 }
 
 func (w *WSClient) readLoop() {
