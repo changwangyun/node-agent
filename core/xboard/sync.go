@@ -106,6 +106,7 @@ func (s *XboardSync) syncOnce() {
 		s.deployNode(nodeInfo, users)
 	}
 
+	s.reportAlive()
 	s.reportTraffic()
 	s.reportNodeStatus()
 }
@@ -368,6 +369,14 @@ func (s *XboardSync) mapNodeType(nodeType string) string {
 	}
 }
 
+func (s *XboardSync) reportAlive() {
+	if err := s.client.ReportAlive(map[string]int{
+		fmt.Sprintf("%d", s.cfg.Xboard.NodeID): 1,
+	}); err != nil {
+		log.Printf("[xboard] failed to report alive: %v", err)
+	}
+}
+
 func (s *XboardSync) reportTraffic() {
 	v2ray := s.v2rayStats()
 	if v2ray == nil {
@@ -473,19 +482,19 @@ func (s *XboardSync) v2rayStats() *stats.V2RayStatsCollector {
 }
 
 type NodeInfo struct {
-	Host               string                 `json:"host"`
-	Port               int                    `json:"port"`
-	ServerName         string                 `json:"server_name"`
-	SNI                string                 `json:"sni"`
-	Transport          string                 `json:"transport"`
-	Network            string                 `json:"network"`
-	TLS                int                    `json:"tls"`
-	SpeedLimit         int64                  `json:"speed_limit"`
-	PushInterval       int                    `json:"push_interval"`
-	PullInterval       int                    `json:"pull_interval"`
-	Routes             []RouteConfig          `json:"routes"`
-	NodeSecret         string                 `json:"node_secret"`
-	RotationInterval   int                    `json:"rotation_interval"`
+	Host             string        `json:"host"`
+	Port             int           `json:"port"`
+	ServerName       string        `json:"server_name"`
+	SNI              string        `json:"sni"`
+	Transport        string        `json:"transport"`
+	Network          string        `json:"network"`
+	TLS              int           `json:"tls"`
+	SpeedLimit       int64         `json:"speed_limit"`
+	PushInterval     int           `json:"push_interval"`
+	PullInterval     int           `json:"pull_interval"`
+	Routes           []RouteConfig `json:"routes"`
+	NodeSecret       string        `json:"node_secret"`
+	RotationInterval int           `json:"rotation_interval"`
 
 	RealityPrivateKey string `json:"private_key"`
 	RealityPublicKey  string `json:"public_key"`
