@@ -177,7 +177,14 @@ func (s *XboardSync) isNodeConfigChanged(newInfo *NodeInfo) bool {
 		old.RealityDest != newInfo.RealityDest ||
 		old.SpeedLimit != newInfo.SpeedLimit ||
 		old.NodeSecret != newInfo.NodeSecret ||
-		old.RotationInterval != newInfo.RotationInterval
+		old.RotationInterval != newInfo.RotationInterval ||
+		old.Masquerade != newInfo.Masquerade ||
+		old.ObfsType != newInfo.ObfsType ||
+		old.ObfsPass != newInfo.ObfsPass ||
+		old.CertPath != newInfo.CertPath ||
+		old.KeyPath != newInfo.KeyPath ||
+		old.ACMEDomain != newInfo.ACMEDomain ||
+		old.ACMEEmail != newInfo.ACMEEmail
 }
 
 func (s *XboardSync) isUsersChanged(users []UserInfo) bool {
@@ -246,6 +253,19 @@ func (s *XboardSync) buildDeployRequest(u UserInfo, nodeInfo *NodeInfo) *configg
 		if nodeInfo.Masquerade != "" {
 			req.Masquerade = nodeInfo.Masquerade
 		}
+		if nodeInfo.TLS == 1 {
+			if nodeInfo.ACMEDomain != "" {
+				req.ACMEDomain = nodeInfo.ACMEDomain
+				req.ACMEEmail = nodeInfo.ACMEEmail
+			} else if nodeInfo.CertPath != "" {
+				req.TLSCertPath = nodeInfo.CertPath
+				req.TLSKeyPath = nodeInfo.KeyPath
+			}
+		}
+		if nodeInfo.ObfsType != "" {
+			req.ObfsType = nodeInfo.ObfsType
+			req.ObfsPass = nodeInfo.ObfsPass
+		}
 
 	case "vless":
 		req.Protocol = "vless"
@@ -298,6 +318,10 @@ func (s *XboardSync) buildDeployRequest(u UserInfo, nodeInfo *NodeInfo) *configg
 				req.TLSCertPath = nodeInfo.CertPath
 				req.TLSKeyPath = nodeInfo.KeyPath
 			}
+		}
+		if nodeInfo.ObfsType != "" {
+			req.ObfsType = nodeInfo.ObfsType
+			req.ObfsPass = nodeInfo.ObfsPass
 		}
 		if nodeInfo.Network == "ws" {
 			req.ObfsType = "ws"
@@ -521,6 +545,8 @@ type NodeInfo struct {
 	WSHost          string                 `json:"ws_host"`
 	GRPCServiceName string                 `json:"grpc_service_name"`
 	Masquerade      string                 `json:"masquerade"`
+	ObfsType        string                 `json:"obfs_type"`
+	ObfsPass        string                 `json:"obfs_password"`
 	NetworkSettings map[string]interface{} `json:"network_settings"`
 }
 

@@ -170,9 +170,19 @@ func (c *XboardClient) GetNodeInfo() (*NodeInfo, error) {
 	if v, ok := data["masquerade"].(string); ok {
 		nodeInfo.Masquerade = v
 	}
+	if v, ok := data["obfs_type"].(string); ok {
+		nodeInfo.ObfsType = v
+	}
+	if v, ok := data["obfs_password"].(string); ok {
+		nodeInfo.ObfsPass = v
+	}
 
 	if tlsSettings, ok := data["tls_settings"].(map[string]interface{}); ok {
 		parseTLSSettings(tlsSettings, nodeInfo)
+	}
+
+	if protocolSettings, ok := data["protocol_settings"].(map[string]interface{}); ok {
+		parseProtocolSettings(protocolSettings, nodeInfo)
 	}
 
 	if networkSettings, ok := data["network_settings"].(map[string]interface{}); ok {
@@ -250,6 +260,24 @@ func parseTLSSettings(tlsSettings map[string]interface{}, nodeInfo *NodeInfo) {
 	}
 	if v, ok := tlsSettings["acme_email"].(string); ok {
 		nodeInfo.ACMEEmail = v
+	}
+}
+
+func parseProtocolSettings(ps map[string]interface{}, nodeInfo *NodeInfo) {
+	if v, ok := ps["obfs_type"].(string); ok && nodeInfo.ObfsType == "" {
+		nodeInfo.ObfsType = v
+	}
+	if v, ok := ps["obfs_password"].(string); ok && nodeInfo.ObfsPass == "" {
+		nodeInfo.ObfsPass = v
+	}
+	if v, ok := ps["masquerade"].(string); ok && nodeInfo.Masquerade == "" {
+		nodeInfo.Masquerade = v
+	}
+	if v, ok := ps["network"].(string); ok && nodeInfo.Network == "" {
+		nodeInfo.Network = v
+	}
+	if v, ok := ps["transport"].(string); ok && nodeInfo.Transport == "" {
+		nodeInfo.Transport = v
 	}
 }
 
