@@ -1,7 +1,7 @@
 # Node Agent — VPN 节点控制系统技术文档
 
-> 版本：1.13.0  
-> 最后更新：2026-05-06
+> 版本：1.14.0  
+> 最后更新：2026-05-08
 
 ---
 
@@ -63,7 +63,8 @@
   - [11.1 新增协议支持](#111-新增协议支持)
   - [11.2 自定义统计后端](#112-自定义统计后端)
   - [11.3 对接 Laravel 控制面](#113-对接-laravel-控制面)
-  - [11.4 多节点负载均衡](#114-多节点负载均衡)
+  - [11.4 对接 Xboard 面板](#114-对接-xboard-面板)
+  - [11.5 多节点负载均衡](#115-多节点负载均衡)
 - [12. Laravel 控制面板开发指南](#12-laravel-控制面板开发指南)
   - [12.1 数据库设计](#121-数据库设计)
   - [12.2 核心服务实现](#122-核心服务实现)
@@ -208,6 +209,9 @@ node-agent/
 │   │   └── v2ray_stats.go               # 按用户流量统计（V2Ray API gRPC 客户端）
 │   ├── device/
 │   │   └── limiter.go                   # 设备绑定与并发会话限制
+│   ├── xboard/
+│   │   ├── client.go                    # Xboard UniProxy API 客户端（/config, /user, /push）
+│   │   └── sync.go                      # Xboard 同步逻辑（定时拉取配置/用户、上报流量）
 │   └── heartbeat/
 │       └── reporter.go                  # 心跳上报至 Laravel 控制面
 ├── utils/
@@ -1811,6 +1815,7 @@ Node Agent 内置 CORS 中间件，允许从 Web 页面（如 test.php 测试页
   "api_token": "CHANGE-ME-TO-A-SECURE-TOKEN",
   "log_level": "info",
   "data_dir": "/var/lib/node-agent",
+  "panel_type": "",
   "cors": {
     "enabled": true,
     "allowed_origins": ["*"]
@@ -1826,6 +1831,14 @@ Node Agent 内置 CORS 中间件，允许从 Web 页面（如 test.php 测试页
     "node_id": "node-001",
     "timeout": 10,
     "heartbeat_path": "/api/v1/node/heartbeat"
+  },
+  "xboard": {
+    "api_host": "https://YOUR-XBOARD-DOMAIN",
+    "api_key": "YOUR-XBOARD-NODE-TOKEN",
+    "node_id": 1,
+    "node_type": "hysteria2",
+    "sync_interval": 60,
+    "timeout": 30
   },
   "device_limit": {
     "max_devices": 3,
@@ -1850,6 +1863,7 @@ Node Agent 内置 CORS 中间件，允许从 Web 页面（如 test.php 测试页
 | `data_dir` | string | `/var/lib/node-agent` | 数据存储目录 |
 | `heartbeat_interval` | int | `10` | 心跳上报间隔（秒） |
 | `watchdog_interval` | int | `5` | Watchdog 检测间隔（秒） |
+| `panel_type` | string | `""` | 面板类型，设为 `"xboard"` 启用 Xboard 模式，留空使用 Laravel 模式 |
 
 #### singbox 配置
 
@@ -1890,6 +1904,21 @@ Node Agent 内置 CORS 中间件，允许从 Web 页面（如 test.php 测试页
 | `cors.allowed_origins` | []string | `["*"]` | 允许的来源域名 |
 
 > CORS 的 `Access-Control-Allow-Methods` 和 `Access-Control-Allow-Headers` 在中间件中固定配置，无需手动设置。
+
+#### xboard 配置（Xboard 面板模式）
+
+当 `panel_type` 设为 `"xboard"` 时，Node Agent 从 Xboard 面板拉取配置和用户，不再使用 Laravel 控制面的推送模式。
+
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `api_host` | string | `""` | Xboard 面板地址（如 `https://panel.example.com`） |
+| `api_key` | string | `""` | Xboard 节点通信 Token（在 Xboard 后台节点设置中获取） |
+| `node_id` | int | `0` | Xboard 中的节点 ID |
+| `node_type` | string | `""` | 协议类型：`hysteria2` / `vless` / `trojan` / `reality` |
+| `sync_interval` | int | `60` | 同步间隔（秒），最小 10 秒 |
+| `timeout` | int | `30` | API 请求超时（秒） |
+
+> **模式切换**：`panel_type` 为空或非 `xboard` 时，使用 Laravel 模式（心跳上报 + 面板推送配置）；设为 `xboard` 时，使用 Xboard 模式（定时拉取配置/用户 + 上报流量）。两种模式互斥，不可同时使用。
 
 ---
 
@@ -2619,7 +2648,136 @@ public function deployToNode($node, $user, $protocol)
 }
 ```
 
-### 11.4 多节点负载均衡
+### 11.4 对接 Xboard 面板
+
+Node Agent 支持对接 Xboard 面板，使用 UniProxy API 协议进行通信。与 Laravel 模式（面板推送配置到节点）不同，Xboard 模式采用**节点主动拉取**的方式。
+
+#### 工作模式对比
+
+| 特性 | Laravel 模式 | Xboard 模式 |
+|------|-------------|-------------|
+| 配置下发 | 面板推送（POST /deploy） | 节点拉取（GET /config） |
+| 用户管理 | 面板逐个推送 | 节点批量拉取用户列表 |
+| 流量上报 | 心跳附带流量数据 | 主动推送流量到面板 |
+| 状态上报 | 心跳定时上报 | 无心跳，通过同步日志查看 |
+| 触发方式 | 面板主动调用 | 节点定时轮询 |
+
+#### Xboard UniProxy API
+
+Node Agent 实现了 Xboard 的三个核心 API：
+
+| API | 方法 | 说明 |
+|-----|------|------|
+| `/api/v1/server/UniProxy/config` | GET | 获取节点配置（地址、端口、TLS、Reality 等） |
+| `/api/v1/server/UniProxy/user` | GET | 获取用户列表（UUID、速度限制） |
+| `/api/v1/server/UniProxy/push` | POST | 上报用户流量数据 |
+
+#### 同步流程
+
+```
+┌─────────────┐     定时拉取      ┌─────────────┐
+│  Xboard 面板 │ ◄────────────── │  Node Agent  │
+│  (UniProxy) │                  │   (节点端)    │
+│             │ ──────────────► │             │
+└─────────────┘   返回配置/用户   └──────┬──────┘
+                                       │
+                                       │ 生成配置 + 重载
+                                       ▼
+                                 ┌─────────────┐
+                                 │  sing-box    │
+                                 └──────┬──────┘
+                                        │ 采集流量
+                                        ▼
+                                 ┌─────────────┐
+                                 │ v2ray-stats  │
+                                 └──────┬──────┘
+                                        │ 上报流量
+                                        ▼
+                                 ┌─────────────┐
+                                 │  Xboard 面板 │
+                                 └─────────────┘
+```
+
+1. **拉取节点配置**：获取节点服务器配置（地址、端口、TLS、Reality 密钥等）
+2. **拉取用户列表**：获取允许连接的用户（UUID、速度限制）
+3. **生成 sing-box 配置**：根据节点配置和用户列表自动生成完整的服务端配置
+4. **重载/启动 sing-box**：配置变更后自动重载（SIGHUP），首次自动启动
+5. **上报流量**：通过 V2Ray API 采集按用户流量，推送到 Xboard
+
+#### 配置方式
+
+**方式一：安装脚本配置**
+
+运行安装脚本时选择面板类型为 Xboard：
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/changwangyun/node-agent/main/deploy/install.sh)
+# 选择 "2) Xboard 面板"
+# 输入面板地址、节点 Token、节点 ID、协议类型
+```
+
+**方式二：手动修改配置文件**
+
+编辑 `/etc/node-agent/config.json`：
+
+```json
+{
+  "panel_type": "xboard",
+  "xboard": {
+    "api_host": "https://your-xboard-domain.com",
+    "api_key": "your-node-token",
+    "node_id": 1,
+    "node_type": "hysteria2",
+    "sync_interval": 60,
+    "timeout": 30
+  }
+}
+```
+
+修改后重启服务：`systemctl restart node-agent`
+
+#### Xboard 面板端设置
+
+1. 在 Xboard 后台 **添加节点**，记录节点 ID
+2. 选择协议类型（hysteria2 / vless / trojan / reality）
+3. 配置节点地址、端口、TLS 等参数
+4. 获取节点的通信 Token（`api_key`）
+5. 将以上信息填入 Node Agent 配置文件
+
+#### 支持的协议
+
+| 协议 | Xboard node_type | 说明 |
+|------|-----------------|------|
+| Hysteria2 | `hysteria2` | 支持 TLS、ACME、自签名证书、混淆、带宽限制 |
+| VLESS | `vless` | 支持 TLS + ACME/自签名证书 |
+| Reality | `reality` | 支持 Reality 密钥对、Short ID、握手配置 |
+| Trojan | `trojan` | 支持 TLS + ACME/自签名证书、WebSocket 传输 |
+
+#### 核心模块
+
+| 文件 | 说明 |
+|------|------|
+| [core/xboard/client.go](file:///Volumes/koeyx/box/node-agent/core/xboard/client.go) | UniProxy API 客户端，封装 HTTP 请求和响应解析 |
+| [core/xboard/sync.go](file:///Volumes/koeyx/box/node-agent/core/xboard/sync.go) | 同步逻辑，定时拉取配置/用户、生成 sing-box 配置、上报流量 |
+
+#### 日志
+
+Xboard 模式的日志前缀为 `[xboard]`，可通过以下命令查看：
+
+```bash
+journalctl -u node-agent -f | grep xboard
+```
+
+常见日志：
+
+```
+[xboard] starting sync, interval=60s
+[xboard] config updated: 10 users deployed
+[xboard] failed to get node info: server returned 401: ...
+[xboard] failed to report traffic: ...
+```
+
+### 11.5 多节点负载均衡
 
 **DNS 轮询方案**：
 
@@ -3665,6 +3823,27 @@ object ConfigBuilder {
 ---
 
 ## 15. 版本变更记录
+
+### v1.14.0 (2026-05-08)
+
+**新功能**：
+
+- **Xboard 面板对接**：新增 `core/xboard/` 模块，支持通过 UniProxy API 对接 Xboard 面板
+  - `client.go`：UniProxy API 客户端，实现 `/config`、`/user`、`/push` 三个接口
+  - `sync.go`：定时同步逻辑，拉取节点配置和用户列表，自动生成 sing-box 配置并重载，上报用户流量
+- **双面板模式**：配置文件新增 `panel_type` 字段，支持 Laravel（推送模式）和 Xboard（拉取模式）两种面板类型
+- **Xboard 配置块**：新增 `xboard` 配置项，包含 `api_host`、`api_key`、`node_id`、`node_type`、`sync_interval`、`timeout`
+- **安装脚本面板选择**：`install.sh` 安装时支持选择面板类型（Laravel / Xboard），Xboard 模式引导配置面板地址、Token、节点 ID、协议类型
+- **Generator 批量用户方法**：`Generator` 新增 `DeployBatch()` 和 `RemoveAllDeploys()` 方法，支持批量用户部署和清除
+
+**支持的协议**：
+
+| 协议 | Xboard node_type | 特性 |
+|------|-----------------|------|
+| Hysteria2 | `hysteria2` | TLS/ACME/自签名/混淆/带宽 |
+| VLESS | `vless` | TLS/ACME/自签名 |
+| Reality | `reality` | 密钥对/Short ID/握手 |
+| Trojan | `trojan` | TLS/ACME/自签名/WebSocket |
 
 ### v1.13.0 (2026-05-06)
 
