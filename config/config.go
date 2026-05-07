@@ -5,8 +5,29 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 )
+
+type FlexibleString string
+
+func (fs *FlexibleString) UnmarshalJSON(data []byte) error {
+	var s string
+	if err := json.Unmarshal(data, &s); err == nil {
+		*fs = FlexibleString(s)
+		return nil
+	}
+	var n float64
+	if err := json.Unmarshal(data, &n); err == nil {
+		*fs = FlexibleString(strconv.FormatFloat(n, 'f', -1, 64))
+		return nil
+	}
+	return fmt.Errorf("FlexibleString: cannot unmarshal %s", string(data))
+}
+
+func (fs FlexibleString) String() string {
+	return string(fs)
+}
 
 type Config struct {
 	mu sync.RWMutex
@@ -64,15 +85,15 @@ type CORSConfig struct {
 }
 
 type XboardConfig struct {
-	APIHost          string `json:"api_host"`
-	APIKey           string `json:"api_key"`
-	NodeID           string `json:"node_id"`
-	NodeType         string `json:"node_type"`
-	SyncInterval     int    `json:"sync_interval"`
-	Timeout          int    `json:"timeout"`
-	DeviceLimit      int    `json:"device_limit"`
-	NodeSecret       string `json:"node_secret"`
-	RotationInterval int    `json:"rotation_interval"`
+	APIHost          string         `json:"api_host"`
+	APIKey           string         `json:"api_key"`
+	NodeID           FlexibleString `json:"node_id"`
+	NodeType         string         `json:"node_type"`
+	SyncInterval     int            `json:"sync_interval"`
+	Timeout          int            `json:"timeout"`
+	DeviceLimit      int            `json:"device_limit"`
+	NodeSecret       string         `json:"node_secret"`
+	RotationInterval int            `json:"rotation_interval"`
 }
 
 var (
