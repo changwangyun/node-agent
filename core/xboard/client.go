@@ -167,6 +167,9 @@ func (c *XboardClient) GetNodeInfo() (*NodeInfo, error) {
 	if v, ok := data["rotation_interval"].(float64); ok {
 		nodeInfo.RotationInterval = int(v)
 	}
+	if v, ok := data["masquerade"].(string); ok {
+		nodeInfo.Masquerade = v
+	}
 
 	if tlsSettings, ok := data["tls_settings"].(map[string]interface{}); ok {
 		parseTLSSettings(tlsSettings, nodeInfo)

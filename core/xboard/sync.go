@@ -222,21 +222,29 @@ func (s *XboardSync) buildDeployRequest(u UserInfo, nodeInfo *NodeInfo) *configg
 	switch s.cfg.Xboard.NodeType {
 	case "hysteria2", "hysteria":
 		req.Protocol = "hysteria2"
-		req.UpMbps = 100
-		req.DownMbps = 200
-		if u.SpeedLimit > 0 {
-			req.DownMbps = int(u.SpeedLimit / 1000000)
-			if req.DownMbps < 10 {
-				req.DownMbps = 10
-			}
-			req.UpMbps = req.DownMbps
-		}
 		if nodeInfo.SpeedLimit > 0 {
 			nodeLimit := int(nodeInfo.SpeedLimit / 1000000)
-			if nodeLimit > 0 && nodeLimit < req.DownMbps {
-				req.DownMbps = nodeLimit
-				req.UpMbps = nodeLimit
+			if nodeLimit < 1 {
+				nodeLimit = 1
 			}
+			req.UpMbps = nodeLimit
+			req.DownMbps = nodeLimit
+		} else {
+			req.UpMbps = 100
+			req.DownMbps = 200
+		}
+		if u.SpeedLimit > 0 {
+			userLimit := int(u.SpeedLimit / 1000000)
+			if userLimit < 1 {
+				userLimit = 1
+			}
+			if userLimit < req.DownMbps {
+				req.DownMbps = userLimit
+				req.UpMbps = userLimit
+			}
+		}
+		if nodeInfo.Masquerade != "" {
+			req.Masquerade = nodeInfo.Masquerade
 		}
 
 	case "vless":
@@ -512,6 +520,7 @@ type NodeInfo struct {
 	WSPath          string                 `json:"ws_path"`
 	WSHost          string                 `json:"ws_host"`
 	GRPCServiceName string                 `json:"grpc_service_name"`
+	Masquerade      string                 `json:"masquerade"`
 	NetworkSettings map[string]interface{} `json:"network_settings"`
 }
 

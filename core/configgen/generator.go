@@ -31,6 +31,8 @@ type DeployRequest struct {
 	UpMbps   int `json:"up_mbps,omitempty"`
 	DownMbps int `json:"down_mbps,omitempty"`
 
+	Masquerade string `json:"masquerade,omitempty"`
+
 	TLSCertPath string `json:"tls_cert_path,omitempty"`
 	TLSKeyPath  string `json:"tls_key_path,omitempty"`
 
@@ -607,13 +609,18 @@ func (g *Generator) generateHysteria2Inbound(req *DeployRequest, certPath, keyPa
 		password = req.UserID
 	}
 
+	masquerade := req.Masquerade
+	if masquerade == "" {
+		masquerade = "https://www.bing.com"
+	}
+
 	inbound := &Inbound{
 		Type:       "hysteria2",
 		Tag:        "hysteria2-in",
 		Listen:     "0.0.0.0",
 		ListenPort: req.Port,
 		Users:      []InboundUser{{Name: req.UserID, Password: password}},
-		Masquerade: "https://www.bing.com",
+		Masquerade: masquerade,
 		TLS:        &InboundTLS{Enabled: true, ServerName: sni, ALPN: []string{"h3"}},
 	}
 
