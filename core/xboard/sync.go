@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -36,7 +37,7 @@ type XboardSync struct {
 
 	lastUserMap   map[int]*UserInfo
 	lastNodeInfo  *NodeInfo
-	lastAliveUIDs map[string]bool
+	lastAliveUIDs map[int]bool
 
 	wsConnected bool
 }
@@ -516,8 +517,13 @@ func (s *XboardSync) mapNodeType(nodeType string) string {
 }
 
 func (s *XboardSync) reportAlive() {
+	uuidToID := make(map[string]int)
+	for id, info := range s.lastUserMap {
+		uuidToID[info.UUID] = id
+	}
+
 	ipData := make(map[string][]string)
-	currentUIDs := make(map[string]bool)
+	currentIDs := make(map[int]bool)
 
 	if mc, ok := s.collector.(*stats.MultiCollector); ok {
 		if users, err := mc.GetOnlineUsers(); err == nil {
@@ -525,21 +531,27 @@ func (s *XboardSync) reportAlive() {
 				if strings.HasSuffix(u.UserID, "@prev") {
 					continue
 				}
-				currentUIDs[u.UserID] = true
+				id, ok := uuidToID[u.UserID]
+				if !ok {
+					continue
+				}
+				idStr := strconv.Itoa(id)
+				currentIDs[id] = true
 				if u.IP != "" {
-					ipData[u.UserID] = append(ipData[u.UserID], u.IP)
+					ipData[idStr] = append(ipData[idStr], u.IP)
 				}
 			}
 		}
 	}
 
-	for uid := range s.lastAliveUIDs {
-		if !currentUIDs[uid] {
-			ipData[uid] = []string{}
+	for id := range s.lastAliveUIDs {
+		if !currentIDs[id] {
+			idStr := strconv.Itoa(id)
+			ipData[idStr] = []string{}
 		}
 	}
 
-	s.lastAliveUIDs = currentUIDs
+	s.lastAliveUIDs = currentIDs
 
 	if err := s.client.ReportAliveWithIPs(ipData); err != nil {
 		log.Printf("[xboard] failed to report alive: %v", err)
