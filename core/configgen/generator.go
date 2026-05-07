@@ -31,6 +31,8 @@ type DeployRequest struct {
 	UpMbps   int `json:"up_mbps,omitempty"`
 	DownMbps int `json:"down_mbps,omitempty"`
 
+	DeviceLimit int `json:"device_limit,omitempty"`
+
 	Masquerade string `json:"masquerade,omitempty"`
 
 	TLSCertPath string `json:"tls_cert_path,omitempty"`
@@ -1134,6 +1136,16 @@ func (g *Generator) GetDeployedUsers() map[string]string {
 	result := make(map[string]string, len(g.deploys))
 	for k, v := range g.deploys {
 		result[k] = v.Protocol
+	}
+	return result
+}
+
+func (g *Generator) GetDeployRequests() map[string]*DeployRequest {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	result := make(map[string]*DeployRequest, len(g.deploys))
+	for k, v := range g.deploys {
+		result[k] = v
 	}
 	return result
 }

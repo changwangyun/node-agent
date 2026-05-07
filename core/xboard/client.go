@@ -380,6 +380,11 @@ func (c *XboardClient) ReportAlive(aliveData map[string]int) error {
 	return c.doPost(url, aliveData)
 }
 
+func (c *XboardClient) ReportAliveWithIPs(payload map[string]interface{}) error {
+	url := c.buildURL("/alive")
+	return c.doPost(url, payload)
+}
+
 type NodeStatus struct {
 	CPU  float64      `json:"cpu"`
 	Mem  MemoryStatus `json:"mem"`

@@ -107,7 +107,7 @@ func main() {
 
 	var xboardSync *xboard.XboardSync
 	if cfg.IsXboardMode() {
-		xboardSync = xboard.NewXboardSync(cfg, mgr, generator, multiCollector)
+		xboardSync = xboard.NewXboardSync(cfg, mgr, generator, multiCollector, limiter)
 		go func() {
 			log.Printf("[xboard] starting sync, interval=%ds", cfg.Xboard.SyncInterval)
 			xboardSync.Start()

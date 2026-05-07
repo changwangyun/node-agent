@@ -13,6 +13,7 @@ import (
 
 	"node-agent/config"
 	"node-agent/core/configgen"
+	"node-agent/core/device"
 	"node-agent/core/singbox"
 	"node-agent/core/stats"
 	"node-agent/utils"
@@ -25,6 +26,7 @@ type XboardSync struct {
 	mgr       *singbox.Manager
 	generator *configgen.Generator
 	collector stats.Collector
+	limiter   *device.DeviceLimiter
 	client    *XboardClient
 
 	stopCh chan struct{}
@@ -41,6 +43,7 @@ func NewXboardSync(
 	mgr *singbox.Manager,
 	generator *configgen.Generator,
 	collector stats.Collector,
+	limiter *device.DeviceLimiter,
 ) *XboardSync {
 	xcfg := cfg.Xboard
 	client := NewXboardClient(xcfg.APIHost, xcfg.APIKey, xcfg.NodeID.String(), xcfg.NodeType, xcfg.Timeout)
@@ -50,6 +53,7 @@ func NewXboardSync(
 		mgr:         mgr,
 		generator:   generator,
 		collector:   collector,
+		limiter:     limiter,
 		client:      client,
 		stopCh:      make(chan struct{}),
 		lastUserMap: make(map[int]*UserInfo),
@@ -188,12 +192,19 @@ func (s *XboardSync) isNodeConfigChanged(newInfo *NodeInfo) bool {
 }
 
 func (s *XboardSync) isUsersChanged(users []UserInfo) bool {
-	deployedUsers := s.generator.GetDeployedUsers()
+	deployedUsers := s.generator.GetDeployRequests()
 	if len(deployedUsers) != len(users) {
 		return true
 	}
 	for _, u := range users {
-		if _, exists := deployedUsers[u.UUID]; !exists {
+		existing, exists := deployedUsers[u.UUID]
+		if !exists {
+			return true
+		}
+		if existing.DeviceLimit != u.DeviceLimit {
+			return true
+		}
+		if int64(existing.UpMbps*1000000) != int64(u.SpeedLimit) && int64(existing.DownMbps*1000000) != int64(u.SpeedLimit) {
 			return true
 		}
 	}
@@ -213,13 +224,14 @@ func (s *XboardSync) buildDeployRequest(u UserInfo, nodeInfo *NodeInfo) *configg
 	}
 
 	req := &configgen.DeployRequest{
-		UserID:   u.UUID,
-		NodeID:   s.cfg.Xboard.NodeID.String(),
-		Protocol: s.mapNodeType(s.cfg.Xboard.NodeType),
-		Server:   nodeInfo.Host,
-		Port:     nodeInfo.Port,
-		Password: password,
-		UUID:     uuid,
+		UserID:      u.UUID,
+		NodeID:      s.cfg.Xboard.NodeID.String(),
+		Protocol:    s.mapNodeType(s.cfg.Xboard.NodeType),
+		Server:      nodeInfo.Host,
+		Port:        nodeInfo.Port,
+		Password:    password,
+		UUID:        uuid,
+		DeviceLimit: u.DeviceLimit,
 	}
 
 	if nodeInfo.SNI != "" {
@@ -402,9 +414,32 @@ func (s *XboardSync) mapNodeType(nodeType string) string {
 }
 
 func (s *XboardSync) reportAlive() {
-	if err := s.client.ReportAlive(map[string]int{
-		s.cfg.Xboard.NodeID.String(): 1,
-	}); err != nil {
+	aliveData := make(map[string]int)
+	ipData := make(map[string][]string)
+
+	if mc, ok := s.collector.(*stats.MultiCollector); ok {
+		if users, err := mc.GetOnlineUsers(); err == nil {
+			for _, u := range users {
+				aliveData[u.UserID]++
+				if u.IP != "" {
+					ipData[u.UserID] = append(ipData[u.UserID], u.IP)
+				}
+			}
+		}
+	}
+
+	if len(aliveData) == 0 {
+		aliveData[s.cfg.Xboard.NodeID.String()] = 1
+	}
+
+	payload := map[string]interface{}{
+		"alive": aliveData,
+	}
+	if len(ipData) > 0 {
+		payload["ips"] = ipData
+	}
+
+	if err := s.client.ReportAliveWithIPs(payload); err != nil {
 		log.Printf("[xboard] failed to report alive: %v", err)
 	}
 }
