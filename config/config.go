@@ -17,9 +17,13 @@ type Config struct {
 	LogLevel string `json:"log_level"`
 	DataDir  string `json:"data_dir"`
 
+	PanelType string `json:"panel_type"`
+
 	SingBox SingBoxConfig `json:"singbox"`
 
 	ControlPlane ControlPlaneConfig `json:"control_plane"`
+
+	Xboard XboardConfig `json:"xboard,omitempty"`
 
 	DeviceLimit DeviceLimitConfig `json:"device_limit"`
 
@@ -57,6 +61,15 @@ type DeviceLimitConfig struct {
 type CORSConfig struct {
 	Enabled        bool     `json:"enabled"`
 	AllowedOrigins []string `json:"allowed_origins"`
+}
+
+type XboardConfig struct {
+	APIHost      string `json:"api_host"`
+	APIKey       string `json:"api_key"`
+	NodeID       int    `json:"node_id"`
+	NodeType     string `json:"node_type"`
+	SyncInterval int    `json:"sync_interval"`
+	Timeout      int    `json:"timeout"`
 }
 
 var (
@@ -168,6 +181,12 @@ func (c *Config) GetAPIAddr() string {
 
 func (c *Config) GetControlPlaneURL() string {
 	return c.ControlPlane.URL
+}
+
+func (c *Config) IsXboardMode() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.PanelType == "xboard" || c.Xboard.APIHost != ""
 }
 
 func (c *Config) IsIPWhitelisted(ip string) bool {

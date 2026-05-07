@@ -18,6 +18,7 @@ import (
 	"node-agent/core/heartbeat"
 	"node-agent/core/singbox"
 	"node-agent/core/stats"
+	"node-agent/core/xboard"
 	"node-agent/middleware"
 )
 
@@ -103,10 +104,20 @@ func main() {
 	h = middleware.Recovery(h)
 
 	go startWatchdog(mgr, cfg)
-	go func() {
-		log.Printf("[heartbeat] starting reporter, interval=%ds", cfg.HeartbeatInterval)
-		reporter.Start()
-	}()
+
+	var xboardSync *xboard.XboardSync
+	if cfg.IsXboardMode() {
+		xboardSync = xboard.NewXboardSync(cfg, mgr, generator, multiCollector)
+		go func() {
+			log.Printf("[xboard] starting sync, interval=%ds", cfg.Xboard.SyncInterval)
+			xboardSync.Start()
+		}()
+	} else {
+		go func() {
+			log.Printf("[heartbeat] starting reporter, interval=%ds", cfg.HeartbeatInterval)
+			reporter.Start()
+		}()
+	}
 
 	cleanupTicker := time.NewTicker(5 * time.Minute)
 	go func() {
@@ -136,6 +147,9 @@ func main() {
 	log.Printf("[main] received signal: %v, shutting down...", sig)
 
 	reporter.Stop()
+	if xboardSync != nil {
+		xboardSync.Stop()
+	}
 	cleanupTicker.Stop()
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

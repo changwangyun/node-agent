@@ -1084,6 +1084,69 @@ func (g *Generator) RemoveDeploy(userID string) error {
 	return g.writeConfig(cfg)
 }
 
+func (g *Generator) GetDeployedUsers() map[string]string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	result := make(map[string]string, len(g.deploys))
+	for k, v := range g.deploys {
+		result[k] = v.Protocol
+	}
+	return result
+}
+
+func (g *Generator) AddUser(req DeployRequest) (*ClientConfigResult, error) {
+	return g.GenerateAndWrite(&req)
+}
+
+func (g *Generator) RemoveUser(req DeployRequest) error {
+	return g.RemoveDeploy(req.UserID)
+}
+
+func (g *Generator) Generate() (*SingBoxConfig, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	if len(g.deploys) == 0 {
+		return g.generateDefault(), nil
+	}
+
+	cfg, _, err := g.rebuildConfig()
+	if err != nil {
+		return nil, fmt.Errorf("rebuild config: %w", err)
+	}
+	return cfg, nil
+}
+
+func (g *Generator) WriteConfig(cfg *SingBoxConfig) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.current = cfg
+	return g.writeConfig(cfg)
+}
+
+func (g *Generator) SetUsers(reqs []DeployRequest) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	g.deploys = make(map[string]*DeployRequest, len(reqs))
+	for i := range reqs {
+		g.deploys[reqs[i].UserID] = &reqs[i]
+	}
+
+	if len(g.deploys) == 0 {
+		defaultCfg := g.generateDefault()
+		g.current = defaultCfg
+		return g.writeConfig(defaultCfg)
+	}
+
+	cfg, _, err := g.rebuildConfig()
+	if err != nil {
+		return fmt.Errorf("rebuild config: %w", err)
+	}
+	g.current = cfg
+	return g.writeConfig(cfg)
+}
+
 func (g *Generator) generateDefault() *SingBoxConfig {
 	return &SingBoxConfig{
 		Log: &LogConfig{

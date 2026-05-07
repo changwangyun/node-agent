@@ -358,7 +358,7 @@ install_config() {
         return 0
     fi
 
-    local node_id api_token cp_url cp_token
+    local node_id api_token panel_type
 
     read -rp "请输入 Node ID [node-001]: " node_id
     node_id="${node_id:-node-001}"
@@ -367,6 +367,25 @@ install_config() {
     if [ -z "$api_token" ]; then
         api_token=$(openssl rand -hex 16 2>/dev/null || cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "change-me-$(date +%s)")
     fi
+
+    echo ""
+    echo -e "  ${CYAN}请选择面板类型:${NC}"
+    echo "  1) Laravel 自有面板 (面板推送配置到节点)"
+    echo "  2) Xboard 面板 (节点从面板拉取配置)"
+    read -rp "  请选择 [1]: " panel_type
+    panel_type="${panel_type:-1}"
+
+    if [ "$panel_type" = "2" ]; then
+        install_config_xboard "$node_id" "$api_token"
+    else
+        install_config_laravel "$node_id" "$api_token"
+    fi
+}
+
+install_config_laravel() {
+    local node_id="$1"
+    local api_token="$2"
+    local cp_url cp_token
 
     read -rp "请输入控制面板 URL [http://127.0.0.1:8000]: " cp_url
     cp_url="${cp_url:-http://127.0.0.1:8000}"
@@ -402,10 +421,92 @@ install_config() {
 }
 EOF
     chmod 600 "${CONFIG_DIR}/config.json"
-    ok "配置文件已创建: ${CONFIG_DIR}/config.json"
+    ok "配置文件已创建: ${CONFIG_DIR}/config.json (Laravel 面板模式)"
     echo ""
     echo -e "  ${YELLOW}API Token: ${api_token}${NC}"
     echo -e "  ${YELLOW}请妥善保管此 Token！${NC}"
+    echo ""
+}
+
+install_config_xboard() {
+    local node_id="$1"
+    local api_token="$2"
+    local xb_host xb_key xb_node_id xb_node_type xb_interval
+
+    read -rp "请输入 Xboard 面板地址 (例: https://panel.example.com): " xb_host
+    if [ -z "$xb_host" ]; then
+        err "Xboard 面板地址不能为空"
+    fi
+
+    read -rp "请输入 Xboard 节点 Token (在 Xboard 后台节点设置中获取): " xb_key
+    if [ -z "$xb_key" ]; then
+        err "Xboard 节点 Token 不能为空"
+    fi
+
+    read -rp "请输入 Xboard 节点 ID [1]: " xb_node_id
+    xb_node_id="${xb_node_id:-1}"
+
+    echo ""
+    echo -e "  ${CYAN}请选择节点协议类型:${NC}"
+    echo "  1) hysteria2"
+    echo "  2) vless"
+    echo "  3) trojan"
+    echo "  4) reality"
+    read -rp "  请选择 [1]: " xb_node_type_choice
+    xb_node_type_choice="${xb_node_type_choice:-1}"
+    case "$xb_node_type_choice" in
+        2) xb_node_type="vless" ;;
+        3) xb_node_type="trojan" ;;
+        4) xb_node_type="reality" ;;
+        *) xb_node_type="hysteria2" ;;
+    esac
+
+    read -rp "请输入同步间隔（秒）[60]: " xb_interval
+    xb_interval="${xb_interval:-60}"
+
+    cat > "${CONFIG_DIR}/config.json" << EOF
+{
+  "node_id": "${node_id}",
+  "api_port": 8080,
+  "api_token": "${api_token}",
+  "log_level": "info",
+  "data_dir": "/var/lib/node-agent",
+  "panel_type": "xboard",
+  "singbox": {
+    "binary_path": "/usr/local/bin/sing-box",
+    "config_path": "/etc/sing-box/config.json",
+    "work_dir": "/etc/sing-box"
+  },
+  "control_plane": {
+    "url": "",
+    "token": "",
+    "node_id": "${node_id}",
+    "timeout": 10
+  },
+  "xboard": {
+    "api_host": "${xb_host}",
+    "api_key": "${xb_key}",
+    "node_id": ${xb_node_id},
+    "node_type": "${xb_node_type}",
+    "sync_interval": ${xb_interval},
+    "timeout": 30
+  },
+  "device_limit": {
+    "max_devices": 3,
+    "max_concurrent": 5
+  },
+  "ip_whitelist": [],
+  "heartbeat_interval": 10,
+  "watchdog_interval": 5
+}
+EOF
+    chmod 600 "${CONFIG_DIR}/config.json"
+    ok "配置文件已创建: ${CONFIG_DIR}/config.json (Xboard 面板模式)"
+    echo ""
+    echo -e "  ${YELLOW}面板地址:  ${xb_host}${NC}"
+    echo -e "  ${YELLOW}节点 ID:   ${xb_node_id}${NC}"
+    echo -e "  ${YELLOW}协议类型:  ${xb_node_type}${NC}"
+    echo -e "  ${YELLOW}同步间隔:  ${xb_interval}s${NC}"
     echo ""
 }
 

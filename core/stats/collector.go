@@ -471,6 +471,10 @@ func (m *MultiCollector) SetV2RayStats(v *V2RayStatsCollector) {
 	m.v2rayStats = v
 }
 
+func (m *MultiCollector) GetV2RayStats() *V2RayStatsCollector {
+	return m.v2rayStats
+}
+
 func (m *MultiCollector) GetTraffic() (*TrafficData, error) {
 	data, err := m.primary.GetTraffic()
 	if err != nil {
