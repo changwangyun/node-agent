@@ -1838,7 +1838,8 @@ Node Agent 内置 CORS 中间件，允许从 Web 页面（如 test.php 测试页
     "node_id": 1,
     "node_type": "hysteria2",
     "sync_interval": 60,
-    "timeout": 30
+    "timeout": 30,
+    "device_limit": 0
   },
   "device_limit": {
     "max_devices": 3,
@@ -1917,6 +1918,7 @@ Node Agent 内置 CORS 中间件，允许从 Web 页面（如 test.php 测试页
 | `node_type` | string | `""` | 协议类型：`hysteria2` / `vless` / `trojan` / `reality` |
 | `sync_interval` | int | `60` | 同步间隔（秒），最小 10 秒 |
 | `timeout` | int | `30` | API 请求超时（秒） |
+| `device_limit` | int | `0` | 每用户最大设备数（0 = 使用 Xboard 面板配置） |
 
 > **模式切换**：`panel_type` 为空或非 `xboard` 时，使用 Laravel 模式（心跳上报 + 面板推送配置）；设为 `xboard` 时，使用 Xboard 模式（定时拉取配置/用户 + 上报流量）。两种模式互斥，不可同时使用。
 
@@ -2664,13 +2666,16 @@ Node Agent 支持对接 Xboard 面板，使用 UniProxy API 协议进行通信�
 
 #### Xboard UniProxy API
 
-Node Agent 实现了 Xboard 的三个核心 API：
+Node Agent 实现了 Xboard 的核心 UniProxy API：
 
 | API | 方法 | 说明 |
 |-----|------|------|
-| `/api/v1/server/UniProxy/config` | GET | 获取节点配置（地址、端口、TLS、Reality 等） |
-| `/api/v1/server/UniProxy/user` | GET | 获取用户列表（UUID、速度限制） |
-| `/api/v1/server/UniProxy/push` | POST | 上报用户流量数据 |
+| `/api/v1/server/UniProxy/config` | GET | 获取节点配置（地址、端口、TLS、Reality 等），支持 ETag 缓存 |
+| `/api/v1/server/UniProxy/user` | GET | 获取用户列表（UUID、速度限制、设备限制），支持 ETag 缓存 |
+| `/api/v1/server/UniProxy/push` | POST | 上报用户增量流量数据 |
+| `/api/v1/server/UniProxy/alive` | POST | 上报在线设备状态 |
+| `/api/v1/server/UniProxy/status` | POST | 上报节点系统状态（CPU、内存、磁盘） |
+| `/api/v1/server/UniProxy/alivelist` | GET | 获取在线设备列表 |
 
 #### 同步流程
 
@@ -2698,11 +2703,12 @@ Node Agent 实现了 Xboard 的三个核心 API：
                                  └─────────────┘
 ```
 
-1. **拉取节点配置**：获取节点服务器配置（地址、端口、TLS、Reality 密钥等）
-2. **拉取用户列表**：获取允许连接的用户（UUID、速度限制）
+1. **拉取节点配置**：获取节点服务器配置（地址、端口、TLS、Reality 密钥等），支持 ETag 缓存减少带宽
+2. **拉取用户列表**：获取允许连接的用户（UUID、速度限制、设备限制），支持 ETag 缓存
 3. **生成 sing-box 配置**：根据节点配置和用户列表自动生成完整的服务端配置
-4. **重载/启动 sing-box**：配置变更后自动重载（SIGHUP），首次自动启动
-5. **上报流量**：通过 V2Ray API 采集按用户流量，推送到 Xboard
+4. **重载/启动 sing-box**：配置或用户变更后自动重载（SIGHUP），首次自动启动
+5. **上报增量流量**：通过 V2Ray API 采集按用户流量，计算增量后推送到 Xboard
+6. **上报节点状态**：定时上报 CPU、内存、磁盘等系统信息到 Xboard
 
 #### 配置方式
 
@@ -2729,7 +2735,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/changwangyun/node-agent/main
     "node_id": 1,
     "node_type": "hysteria2",
     "sync_interval": 60,
-    "timeout": 30
+    "timeout": 30,
+    "device_limit": 0
   }
 }
 ```
@@ -3829,11 +3836,16 @@ object ConfigBuilder {
 **新功能**：
 
 - **Xboard 面板对接**：新增 `core/xboard/` 模块，支持通过 UniProxy API 对接 Xboard 面板
-  - `client.go`：UniProxy API 客户端，实现 `/config`、`/user`、`/push` 三个接口
-  - `sync.go`：定时同步逻辑，拉取节点配置和用户列表，自动生成 sing-box 配置并重载，上报用户流量
+  - `client.go`：UniProxy API 客户端，实现 `/config`、`/user`、`/push`、`/alive`、`/status`、`/alivelist` 六个接口
+  - `sync.go`：定时同步逻辑，拉取节点配置和用户列表，自动生成 sing-box 配置并重载，上报增量流量和节点状态
+- **ETag 缓存**：`/config` 和 `/user` 接口支持 ETag 缓存，减少不必要的带宽消耗
+- **增量流量上报**：流量数据按增量方式上报（当前值 - 上次上报值），避免重复计算
+- **节点状态上报**：定时上报 CPU、内存、Swap、磁盘使用情况到 Xboard `/status` 接口
+- **配置变更检测**：区分节点配置变更和用户列表变更，仅在有变化时才重载 sing-box
 - **双面板模式**：配置文件新增 `panel_type` 字段，支持 Laravel（推送模式）和 Xboard（拉取模式）两种面板类型
-- **Xboard 配置块**：新增 `xboard` 配置项，包含 `api_host`、`api_key`、`node_id`、`node_type`、`sync_interval`、`timeout`
+- **Xboard 配置块**：新增 `xboard` 配置项，包含 `api_host`、`api_key`、`node_id`、`node_type`、`sync_interval`、`timeout`、`device_limit`
 - **安装脚本面板选择**：`install.sh` 安装时支持选择面板类型（Laravel / Xboard），Xboard 模式引导配置面板地址、Token、节点 ID、协议类型
+- **完整协议参数**：`buildDeployRequest` 支持 Hysteria2/VLESS/Reality/Trojan/Shadowsocks 全协议参数构建，包括 TLS 证书/ACME、WebSocket/gRPC 传输层、Reality 密钥对等
 - **Generator 批量用户方法**：`Generator` 新增 `DeployBatch()` 和 `RemoveAllDeploys()` 方法，支持批量用户部署和清除
 
 **支持的协议**：

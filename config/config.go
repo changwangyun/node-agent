@@ -70,6 +70,7 @@ type XboardConfig struct {
 	NodeType     string `json:"node_type"`
 	SyncInterval int    `json:"sync_interval"`
 	Timeout      int    `json:"timeout"`
+	DeviceLimit  int    `json:"device_limit"`
 }
 
 var (
