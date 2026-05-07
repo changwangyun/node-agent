@@ -42,6 +42,9 @@ type DeployRequest struct {
 	RealityShortID    string `json:"reality_short_id,omitempty"`
 	RealityDest       string `json:"reality_dest,omitempty"`
 	RealityDestPort   int    `json:"reality_dest_port,omitempty"`
+
+	PrevPassword string `json:"prev_password,omitempty"`
+	PrevUUID     string `json:"prev_uuid,omitempty"`
 }
 
 type ClientConfigResult struct {
@@ -419,6 +422,40 @@ func (g *Generator) rebuildConfig() (*SingBoxConfig, *ClientConfigResult, error)
 					}
 					existingUsers[req.UserID] = true
 				}
+			}
+		}
+
+		for _, req := range reqs {
+			if req.PrevPassword == "" {
+				continue
+			}
+			prevName := req.UserID + "@prev"
+			alreadyExists := false
+			for _, u := range inbound.Users {
+				if u.Name == prevName {
+					alreadyExists = true
+					break
+				}
+			}
+			if alreadyExists {
+				continue
+			}
+			switch req.Protocol {
+			case "hysteria2", "trojan":
+				inbound.Users = append(inbound.Users, InboundUser{
+					Name:     prevName,
+					Password: req.PrevPassword,
+				})
+			case "vless", "reality":
+				prevUUID := req.PrevUUID
+				if prevUUID == "" {
+					prevUUID = req.PrevPassword
+				}
+				inbound.Users = append(inbound.Users, InboundUser{
+					Name: prevName,
+					UUID: prevUUID,
+					Flow: "xtls-rprx-vision",
+				})
 			}
 		}
 

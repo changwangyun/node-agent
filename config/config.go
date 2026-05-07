@@ -64,13 +64,15 @@ type CORSConfig struct {
 }
 
 type XboardConfig struct {
-	APIHost      string `json:"api_host"`
-	APIKey       string `json:"api_key"`
-	NodeID       int    `json:"node_id"`
-	NodeType     string `json:"node_type"`
-	SyncInterval int    `json:"sync_interval"`
-	Timeout      int    `json:"timeout"`
-	DeviceLimit  int    `json:"device_limit"`
+	APIHost          string `json:"api_host"`
+	APIKey           string `json:"api_key"`
+	NodeID           int    `json:"node_id"`
+	NodeType         string `json:"node_type"`
+	SyncInterval     int    `json:"sync_interval"`
+	Timeout          int    `json:"timeout"`
+	DeviceLimit      int    `json:"device_limit"`
+	NodeSecret       string `json:"node_secret"`
+	RotationInterval int    `json:"rotation_interval"`
 }
 
 var (

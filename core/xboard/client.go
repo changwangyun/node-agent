@@ -19,8 +19,8 @@ type XboardClient struct {
 	timeout  time.Duration
 	client   *http.Client
 
-	mu     sync.RWMutex
-	etags  map[string]string
+	mu    sync.RWMutex
+	etags map[string]string
 }
 
 func NewXboardClient(apiHost, apiKey string, nodeID int, nodeType string, timeout int) *XboardClient {
@@ -163,6 +163,12 @@ func (c *XboardClient) GetNodeInfo() (*NodeInfo, error) {
 	}
 	if v, ok := data["speed_limit"].(float64); ok {
 		nodeInfo.SpeedLimit = int64(v)
+	}
+	if v, ok := data["node_secret"].(string); ok {
+		nodeInfo.NodeSecret = v
+	}
+	if v, ok := data["rotation_interval"].(float64); ok {
+		nodeInfo.RotationInterval = int(v)
 	}
 
 	if tlsSettings, ok := data["tls_settings"].(map[string]interface{}); ok {
@@ -323,6 +329,12 @@ func (c *XboardClient) GetUserList() ([]UserInfo, error) {
 			if v, ok := userMap["device_limit"].(float64); ok {
 				u.DeviceLimit = int(v)
 			}
+			if v, ok := userMap["dynamic_password"].(string); ok {
+				u.DynamicPassword = v
+			}
+			if v, ok := userMap["password_expires_at"].(float64); ok {
+				u.PasswordExpiresAt = int64(v)
+			}
 			users = append(users, u)
 		}
 	}
@@ -341,10 +353,10 @@ func (c *XboardClient) ReportAlive(aliveData map[string]int) error {
 }
 
 type NodeStatus struct {
-	CPU    float64         `json:"cpu"`
-	Mem    MemoryStatus    `json:"mem"`
-	Swap   MemoryStatus    `json:"swap,omitempty"`
-	Disk   MemoryStatus    `json:"disk,omitempty"`
+	CPU  float64      `json:"cpu"`
+	Mem  MemoryStatus `json:"mem"`
+	Swap MemoryStatus `json:"swap,omitempty"`
+	Disk MemoryStatus `json:"disk,omitempty"`
 }
 
 type MemoryStatus struct {

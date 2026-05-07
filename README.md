@@ -1,6 +1,6 @@
 # Node Agent — VPN 节点控制系统技术文档
 
-> 版本：1.14.0  
+> 版本：1.15.0  
 > 最后更新：2026-05-08
 
 ---
@@ -1839,7 +1839,9 @@ Node Agent 内置 CORS 中间件，允许从 Web 页面（如 test.php 测试页
     "node_type": "hysteria2",
     "sync_interval": 60,
     "timeout": 30,
-    "device_limit": 0
+    "device_limit": 0,
+    "node_secret": "",
+    "rotation_interval": 0
   },
   "device_limit": {
     "max_devices": 3,
@@ -1919,6 +1921,8 @@ Node Agent 内置 CORS 中间件，允许从 Web 页面（如 test.php 测试页
 | `sync_interval` | int | `60` | 同步间隔（秒），最小 10 秒 |
 | `timeout` | int | `30` | API 请求超时（秒） |
 | `device_limit` | int | `0` | 每用户最大设备数（0 = 使用 Xboard 面板配置） |
+| `node_secret` | string | `""` | 动态密码密钥（32 字节随机字符串，空 = 禁用动态密码） |
+| `rotation_interval` | int | `0` | 密码轮换间隔（秒），0 = 禁用动态密码，推荐 3600 |
 
 > **模式切换**：`panel_type` 为空或非 `xboard` 时，使用 Laravel 模式（心跳上报 + 面板推送配置）；设为 `xboard` 时，使用 Xboard 模式（定时拉取配置/用户 + 上报流量）。两种模式互斥，不可同时使用。
 
@@ -2710,6 +2714,40 @@ Node Agent 实现了 Xboard 的核心 UniProxy API：
 5. **上报增量流量**：通过 V2Ray API 采集按用户流量，计算增量后推送到 Xboard
 6. **上报节点状态**：定时上报 CPU、内存、磁盘等系统信息到 Xboard
 
+#### 动态密码（可选）
+
+启用后，用户密码按时间窗口自动轮换，密码泄露仅影响当前窗口，窗口结束后自动失效。
+
+**算法**：`HMAC-SHA256(user_uuid, node_secret:time_window)` → Base64 → 密码
+
+**过渡期机制**：密码轮换时，sing-box 同时接受当前窗口和前一窗口的密码，确保客户端无感知切换。
+
+**配置方式**：
+
+```json
+{
+  "xboard": {
+    "node_secret": "your-random-32-byte-secret",
+    "rotation_interval": 3600
+  }
+}
+```
+
+| 参数 | 说明 |
+|------|------|
+| `node_secret` | 动态密码密钥，Panel 和 Node Agent 必须一致 |
+| `rotation_interval` | 轮换间隔（秒），0 = 禁用，推荐 3600（1小时） |
+
+**Panel 端要求**：
+- `/config` 接口需返回 `node_secret` 和 `rotation_interval`
+- `/user` 接口需返回 `dynamic_password` 和 `password_expires_at`
+- 订阅接口需使用动态密码替换原始 UUID
+
+**客户端要求**：
+- 解析订阅中的密码过期时间
+- 过期前 5 分钟自动调用刷新接口获取新密码
+- 连接失败时立即刷新订阅
+
 #### 配置方式
 
 **方式一：安装脚本配置**
@@ -2736,7 +2774,9 @@ bash <(curl -fsSL https://raw.githubusercontent.com/changwangyun/node-agent/main
     "node_type": "hysteria2",
     "sync_interval": 60,
     "timeout": 30,
-    "device_limit": 0
+    "device_limit": 0,
+    "node_secret": "",
+    "rotation_interval": 0
   }
 }
 ```
@@ -3857,6 +3897,20 @@ object ConfigBuilder {
 | Reality | `reality` | 密钥对/Short ID/握手 |
 | Trojan | `trojan` | TLS/ACME/自签名/WebSocket |
 
+### v1.15.0 (2026-05-08)
+
+**新功能 — 动态密码**：
+
+- **HMAC-SHA256 时间窗口密码轮换**：密码按时间窗口自动轮换，泄露仅影响当前窗口
+- **过渡期双密码**：密码轮换时 sing-box 同时接受当前窗口和前一窗口密码，客户端无感知切换
+- **Panel 配置同步**：`node_secret` 和 `rotation_interval` 从 Panel `/config` 接口动态获取
+- **本地计算过渡期密码**：Node Agent 本地 HMAC 计算前一窗口密码，无需额外回调 Panel，自主容错
+- **配置变更检测扩展**：新增 `NodeSecret`、`RotationInterval` 变更检测
+- **XboardConfig 新增字段**：`node_secret`（动态密码密钥）、`rotation_interval`（轮换间隔秒数）
+- **UserInfo 新增字段**：`dynamic_password`（当前窗口密码）、`password_expires_at`（过期时间戳）
+- **DeployRequest 新增字段**：`prev_password`、`prev_uuid`（过渡期凭证）
+- **rebuildConfig 过渡期用户**：为每个启用动态密码的用户生成 `@prev` 后缀的过渡期 inbound user
+
 ### v1.13.0 (2026-05-06)
 
 **新功能**：
@@ -4107,5 +4161,3 @@ object ConfigBuilder {
 - 心跳上报（节点状态/流量/在线信息/系统信息）
 - 安全机制（Token 认证 / IP 白名单 / HMAC 签名验证）
 - 一键安装脚本
-- Web 测试页面（test.php）
-- systemd 服务管理

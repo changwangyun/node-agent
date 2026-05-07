@@ -1,6 +1,10 @@
 package xboard
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -170,7 +174,9 @@ func (s *XboardSync) isNodeConfigChanged(newInfo *NodeInfo) bool {
 		old.RealityPrivateKey != newInfo.RealityPrivateKey ||
 		old.RealityShortID != newInfo.RealityShortID ||
 		old.RealityDest != newInfo.RealityDest ||
-		old.SpeedLimit != newInfo.SpeedLimit
+		old.SpeedLimit != newInfo.SpeedLimit ||
+		old.NodeSecret != newInfo.NodeSecret ||
+		old.RotationInterval != newInfo.RotationInterval
 }
 
 func (s *XboardSync) isUsersChanged(users []UserInfo) bool {
@@ -187,14 +193,25 @@ func (s *XboardSync) isUsersChanged(users []UserInfo) bool {
 }
 
 func (s *XboardSync) buildDeployRequest(u UserInfo, nodeInfo *NodeInfo) *configgen.DeployRequest {
+	password := u.UUID
+	uuid := u.UUID
+
+	dynamicEnabled := nodeInfo.RotationInterval > 0 && nodeInfo.NodeSecret != ""
+	if dynamicEnabled && u.DynamicPassword != "" {
+		password = u.DynamicPassword
+		if s.cfg.Xboard.NodeType == "vless" || s.cfg.Xboard.NodeType == "reality" {
+			uuid = u.DynamicPassword
+		}
+	}
+
 	req := &configgen.DeployRequest{
 		UserID:   u.UUID,
 		NodeID:   fmt.Sprintf("%d", s.cfg.Xboard.NodeID),
 		Protocol: s.mapNodeType(s.cfg.Xboard.NodeType),
 		Server:   nodeInfo.Host,
 		Port:     nodeInfo.Port,
-		Password: u.UUID,
-		UUID:     u.UUID,
+		Password: password,
+		UUID:     uuid,
 	}
 
 	if nodeInfo.SNI != "" {
@@ -285,12 +302,51 @@ func (s *XboardSync) buildDeployRequest(u UserInfo, nodeInfo *NodeInfo) *configg
 		req.Protocol = "shadowsocks"
 	}
 
+	if dynamicEnabled {
+		prevPassword := s.computePrevWindowPassword(u.UUID, nodeInfo)
+		if prevPassword != "" {
+			req.PrevPassword = prevPassword
+			if s.cfg.Xboard.NodeType == "vless" || s.cfg.Xboard.NodeType == "reality" {
+				req.PrevUUID = formatDynamicUUID(prevPassword)
+			}
+		}
+	}
+
 	if u.SpeedLimit > 0 && req.Protocol != "hysteria2" {
 		speedBps := int64(u.SpeedLimit)
 		_ = speedBps
 	}
 
 	return req
+}
+
+func (s *XboardSync) computePrevWindowPassword(userUUID string, nodeInfo *NodeInfo) string {
+	interval := int64(nodeInfo.RotationInterval)
+	if interval <= 0 {
+		return ""
+	}
+	prevWindow := (time.Now().Unix() / interval) - 1
+	return computeDynamicPassword(userUUID, nodeInfo.NodeSecret, prevWindow)
+}
+
+func computeDynamicPassword(userUUID, nodeSecret string, timeWindow int64) string {
+	message := fmt.Sprintf("%s:%d", nodeSecret, timeWindow)
+	mac := hmac.New(sha256.New, []byte(userUUID))
+	mac.Write([]byte(message))
+	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil)[:16])
+}
+
+func formatDynamicUUID(hash string) string {
+	raw, err := base64.RawURLEncoding.DecodeString(hash)
+	if err != nil || len(raw) < 16 {
+		return hash
+	}
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
+		binary.BigEndian.Uint32(raw[0:4]),
+		binary.BigEndian.Uint16(raw[4:6]),
+		binary.BigEndian.Uint16(raw[6:8]),
+		binary.BigEndian.Uint16(raw[8:10]),
+		raw[10:16])
 }
 
 func (s *XboardSync) mapNodeType(nodeType string) string {
@@ -417,17 +473,19 @@ func (s *XboardSync) v2rayStats() *stats.V2RayStatsCollector {
 }
 
 type NodeInfo struct {
-	Host         string        `json:"host"`
-	Port         int           `json:"port"`
-	ServerName   string        `json:"server_name"`
-	SNI          string        `json:"sni"`
-	Transport    string        `json:"transport"`
-	Network      string        `json:"network"`
-	TLS          int           `json:"tls"`
-	SpeedLimit   int64         `json:"speed_limit"`
-	PushInterval int           `json:"push_interval"`
-	PullInterval int           `json:"pull_interval"`
-	Routes       []RouteConfig `json:"routes"`
+	Host               string                 `json:"host"`
+	Port               int                    `json:"port"`
+	ServerName         string                 `json:"server_name"`
+	SNI                string                 `json:"sni"`
+	Transport          string                 `json:"transport"`
+	Network            string                 `json:"network"`
+	TLS                int                    `json:"tls"`
+	SpeedLimit         int64                  `json:"speed_limit"`
+	PushInterval       int                    `json:"push_interval"`
+	PullInterval       int                    `json:"pull_interval"`
+	Routes             []RouteConfig          `json:"routes"`
+	NodeSecret         string                 `json:"node_secret"`
+	RotationInterval   int                    `json:"rotation_interval"`
 
 	RealityPrivateKey string `json:"private_key"`
 	RealityPublicKey  string `json:"public_key"`
@@ -455,10 +513,12 @@ type RouteConfig struct {
 }
 
 type UserInfo struct {
-	ID          int     `json:"id"`
-	UUID        string  `json:"uuid"`
-	SpeedLimit  float64 `json:"speed_limit"`
-	DeviceLimit int     `json:"device_limit"`
+	ID                int     `json:"id"`
+	UUID              string  `json:"uuid"`
+	SpeedLimit        float64 `json:"speed_limit"`
+	DeviceLimit       int     `json:"device_limit"`
+	DynamicPassword   string  `json:"dynamic_password"`
+	PasswordExpiresAt int64   `json:"password_expires_at"`
 }
 
 func (n *NodeInfo) MarshalJSON() ([]byte, error) {
