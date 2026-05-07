@@ -386,10 +386,15 @@ func (c *XboardClient) ReportAliveWithIPs(payload map[string]interface{}) error 
 }
 
 type NodeStatus struct {
-	CPU  float64      `json:"cpu"`
-	Mem  MemoryStatus `json:"mem"`
-	Swap MemoryStatus `json:"swap,omitempty"`
-	Disk MemoryStatus `json:"disk,omitempty"`
+	CPU         float64      `json:"cpu"`
+	Mem         MemoryStatus `json:"mem"`
+	Swap        MemoryStatus `json:"swap,omitempty"`
+	Disk        MemoryStatus `json:"disk,omitempty"`
+	NetInSpeed  float64      `json:"net_in_speed,omitempty"`
+	NetOutSpeed float64      `json:"net_out_speed,omitempty"`
+	Goroutines  int          `json:"goroutines,omitempty"`
+	NumGC       uint32       `json:"num_gc,omitempty"`
+	LastPauseMS float64      `json:"last_pause_ms,omitempty"`
 }
 
 type MemoryStatus struct {

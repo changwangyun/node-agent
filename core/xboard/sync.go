@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
-	"encoding/json"
 	"fmt"
 	"log"
 	"sync"
@@ -28,6 +27,8 @@ type XboardSync struct {
 	collector stats.Collector
 	limiter   *device.DeviceLimiter
 	client    *XboardClient
+	tracker   *Tracker
+	wsClient  *WSClient
 
 	stopCh chan struct{}
 	mu     sync.Mutex
@@ -35,7 +36,7 @@ type XboardSync struct {
 	lastUserMap  map[int]*UserInfo
 	lastNodeInfo *NodeInfo
 
-	lastTraffic map[string][2]int64
+	wsConnected bool
 }
 
 func NewXboardSync(
@@ -47,18 +48,25 @@ func NewXboardSync(
 ) *XboardSync {
 	xcfg := cfg.Xboard
 	client := NewXboardClient(xcfg.APIHost, xcfg.APIKey, xcfg.NodeID.String(), xcfg.NodeType, xcfg.Timeout)
+	wsClient := NewWSClient(xcfg.APIHost, xcfg.APIKey, xcfg.NodeID.String(), xcfg.NodeType)
 
-	return &XboardSync{
+	s := &XboardSync{
 		cfg:         cfg,
 		mgr:         mgr,
 		generator:   generator,
 		collector:   collector,
 		limiter:     limiter,
 		client:      client,
+		tracker:     NewTracker(),
+		wsClient:    wsClient,
 		stopCh:      make(chan struct{}),
 		lastUserMap: make(map[int]*UserInfo),
-		lastTraffic: make(map[string][2]int64),
 	}
+
+	wsClient.SetOnConfigUpdate(s.onWSConfigUpdate)
+	wsClient.SetOnDisconnected(s.onWSDisconnected)
+
+	return s
 }
 
 func (s *XboardSync) Start() {
@@ -68,6 +76,12 @@ func (s *XboardSync) Start() {
 	}
 
 	s.syncOnce()
+
+	go func() {
+		if err := s.wsClient.Connect(); err != nil {
+			log.Printf("[xboard] ws connect failed, using REST polling: %v", err)
+		}
+	}()
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -84,6 +98,29 @@ func (s *XboardSync) Start() {
 
 func (s *XboardSync) Stop() {
 	close(s.stopCh)
+	s.wsClient.Stop()
+}
+
+func (s *XboardSync) onWSConfigUpdate(nodeInfo *NodeInfo, users []UserInfo) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.wsConnected = true
+
+	if nodeInfo != nil {
+		s.deployNode(nodeInfo, users)
+	} else if len(users) > 0 && s.lastNodeInfo != nil {
+		s.deployNode(s.lastNodeInfo, users)
+	}
+
+	log.Printf("[xboard] ws config update received")
+}
+
+func (s *XboardSync) onWSDisconnected() {
+	s.mu.Lock()
+	s.wsConnected = false
+	s.mu.Unlock()
+	log.Printf("[xboard] ws disconnected, falling back to REST polling")
 }
 
 func (s *XboardSync) syncOnce() {
@@ -122,14 +159,18 @@ func (s *XboardSync) deployNode(nodeInfo *NodeInfo, users []UserInfo) {
 	}
 
 	configChanged := s.isNodeConfigChanged(nodeInfo)
-	usersChanged := s.isUsersChanged(users)
 
-	if !configChanged && !usersChanged {
-		s.lastUserMap = currentUserMap
-		s.lastNodeInfo = nodeInfo
-		return
+	if configChanged || s.lastNodeInfo == nil {
+		s.fullDeploy(nodeInfo, users)
+	} else {
+		s.incrementalDeploy(nodeInfo, users)
 	}
 
+	s.lastUserMap = currentUserMap
+	s.lastNodeInfo = nodeInfo
+}
+
+func (s *XboardSync) fullDeploy(nodeInfo *NodeInfo, users []UserInfo) {
 	var reqs []configgen.DeployRequest
 	for _, u := range users {
 		req := s.buildDeployRequest(u, nodeInfo)
@@ -141,6 +182,87 @@ func (s *XboardSync) deployNode(nodeInfo *NodeInfo, users []UserInfo) {
 		return
 	}
 
+	s.reloadKernel()
+	s.updateLimiter(users)
+	log.Printf("[xboard] full deploy: %d users", len(users))
+}
+
+func (s *XboardSync) incrementalDeploy(nodeInfo *NodeInfo, users []UserInfo) {
+	toAdd, toRemove := s.computeUserDiff(users)
+	if len(toAdd) == 0 && len(toRemove) == 0 {
+		return
+	}
+
+	if len(toRemove) > 0 {
+		removeReqs := make([]configgen.DeployRequest, 0, len(toRemove))
+		for _, u := range toRemove {
+			removeReqs = append(removeReqs, configgen.DeployRequest{UserID: u.UUID})
+		}
+		if err := s.generator.RemoveUsers(removeReqs); err != nil {
+			log.Printf("[xboard] failed to remove users: %v", err)
+			s.fullDeploy(nodeInfo, users)
+			return
+		}
+		log.Printf("[xboard] removed %d users", len(toRemove))
+	}
+
+	if len(toAdd) > 0 {
+		addReqs := make([]configgen.DeployRequest, 0, len(toAdd))
+		for _, u := range toAdd {
+			req := s.buildDeployRequest(*u, nodeInfo)
+			addReqs = append(addReqs, *req)
+		}
+		if err := s.generator.AddUsers(addReqs); err != nil {
+			log.Printf("[xboard] failed to add users: %v", err)
+			s.fullDeploy(nodeInfo, users)
+			return
+		}
+		log.Printf("[xboard] added %d users", len(toAdd))
+	}
+
+	s.reloadKernel()
+	s.updateLimiter(users)
+}
+
+func (s *XboardSync) computeUserDiff(newUsers []UserInfo) (toAdd, toRemove []*UserInfo) {
+	newMap := make(map[string]*UserInfo, len(newUsers))
+	for i := range newUsers {
+		newMap[newUsers[i].UUID] = &newUsers[i]
+	}
+
+	deployed := s.generator.GetDeployRequests()
+
+	for uuid := range deployed {
+		if _, exists := newMap[uuid]; !exists {
+			for _, u := range s.lastUserMap {
+				if u.UUID == uuid {
+					toRemove = append(toRemove, u)
+					break
+				}
+			}
+		}
+	}
+
+	for uuid, u := range newMap {
+		existing, exists := deployed[uuid]
+		if !exists {
+			toAdd = append(toAdd, u)
+			continue
+		}
+		if existing.DeviceLimit != u.DeviceLimit {
+			toAdd = append(toAdd, u)
+			continue
+		}
+		if int64(existing.UpMbps*1000000) != int64(u.SpeedLimit) && int64(existing.DownMbps*1000000) != int64(u.SpeedLimit) {
+			toAdd = append(toAdd, u)
+			continue
+		}
+	}
+
+	return
+}
+
+func (s *XboardSync) reloadKernel() {
 	if s.mgr.IsRunning() {
 		if err := s.mgr.Reload(); err != nil {
 			log.Printf("[xboard] reload failed, trying restart: %v", err)
@@ -153,16 +275,19 @@ func (s *XboardSync) deployNode(nodeInfo *NodeInfo, users []UserInfo) {
 			log.Printf("[xboard] start sing-box failed: %v", err)
 		}
 	}
+}
 
-	reason := ""
-	if configChanged {
-		reason = "config changed"
-	} else {
-		reason = "users changed"
+func (s *XboardSync) updateLimiter(users []UserInfo) {
+	if s.limiter == nil {
+		return
 	}
-	log.Printf("[xboard] config updated: %d users deployed (%s)", len(users), reason)
-	s.lastUserMap = currentUserMap
-	s.lastNodeInfo = nodeInfo
+	limits := make(map[string]int, len(users))
+	for _, u := range users {
+		if u.DeviceLimit > 0 {
+			limits[u.UUID] = u.DeviceLimit
+		}
+	}
+	s.limiter.UpdateLimits(limits)
 }
 
 func (s *XboardSync) isNodeConfigChanged(newInfo *NodeInfo) bool {
@@ -189,26 +314,6 @@ func (s *XboardSync) isNodeConfigChanged(newInfo *NodeInfo) bool {
 		old.KeyPath != newInfo.KeyPath ||
 		old.ACMEDomain != newInfo.ACMEDomain ||
 		old.ACMEEmail != newInfo.ACMEEmail
-}
-
-func (s *XboardSync) isUsersChanged(users []UserInfo) bool {
-	deployedUsers := s.generator.GetDeployRequests()
-	if len(deployedUsers) != len(users) {
-		return true
-	}
-	for _, u := range users {
-		existing, exists := deployedUsers[u.UUID]
-		if !exists {
-			return true
-		}
-		if existing.DeviceLimit != u.DeviceLimit {
-			return true
-		}
-		if int64(existing.UpMbps*1000000) != int64(u.SpeedLimit) && int64(existing.DownMbps*1000000) != int64(u.SpeedLimit) {
-			return true
-		}
-	}
-	return false
 }
 
 func (s *XboardSync) buildDeployRequest(u UserInfo, nodeInfo *NodeInfo) *configgen.DeployRequest {
@@ -357,11 +462,6 @@ func (s *XboardSync) buildDeployRequest(u UserInfo, nodeInfo *NodeInfo) *configg
 		}
 	}
 
-	if u.SpeedLimit > 0 && req.Protocol != "hysteria2" {
-		speedBps := int64(u.SpeedLimit)
-		_ = speedBps
-	}
-
 	return req
 }
 
@@ -460,37 +560,25 @@ func (s *XboardSync) reportTraffic() {
 		return
 	}
 
-	trafficData := make(map[string][2]int64)
+	cumTraffic := make(map[string][2]int64, len(allTraffic))
 	for _, us := range allTraffic {
-		last, exists := s.lastTraffic[us.UserID]
-		var delta [2]int64
-		if exists {
-			delta[0] = us.Upload - last[0]
-			delta[1] = us.Download - last[1]
-			if delta[0] < 0 {
-				delta[0] = 0
-			}
-			if delta[1] < 0 {
-				delta[1] = 0
-			}
-		} else {
-			delta[0] = us.Upload
-			delta[1] = us.Download
-		}
-
-		if delta[0] > 0 || delta[1] > 0 {
-			trafficData[us.UserID] = delta
-		}
-
-		s.lastTraffic[us.UserID] = [2]int64{us.Upload, us.Download}
+		cumTraffic[us.UserID] = [2]int64{us.Upload, us.Download}
 	}
 
+	s.tracker.Process(cumTraffic, nil)
+
+	if !s.tracker.HasTraffic() {
+		return
+	}
+
+	trafficData := s.tracker.FlushTraffic()
 	if len(trafficData) == 0 {
 		return
 	}
 
 	if err := s.client.ReportUserTraffic(trafficData); err != nil {
 		log.Printf("[xboard] failed to report traffic: %v", err)
+		s.tracker.RestoreTraffic(trafficData)
 	} else {
 		log.Printf("[xboard] reported traffic for %d users", len(trafficData))
 	}
@@ -513,6 +601,8 @@ func (s *XboardSync) reportNodeStatus() {
 	}
 
 	diskUsedGB, diskTotalGB := utils.GetDiskUsage()
+	netIn, netOut := utils.GetNetSpeed()
+	gcMetrics := utils.GetGCMetrics()
 
 	status := &NodeStatus{
 		CPU: cpuPercent,
@@ -520,6 +610,11 @@ func (s *XboardSync) reportNodeStatus() {
 			Total: int64(memTotalMB) * 1024 * 1024,
 			Used:  int64(memUsedMB) * 1024 * 1024,
 		},
+		NetInSpeed:  netIn,
+		NetOutSpeed: netOut,
+		Goroutines:  gcMetrics.Goroutines,
+		NumGC:       gcMetrics.NumGC,
+		LastPauseMS: gcMetrics.LastPauseMS,
 	}
 
 	if swapTotalMB > 0 {
@@ -598,13 +693,4 @@ type UserInfo struct {
 	DeviceLimit       int     `json:"device_limit"`
 	DynamicPassword   string  `json:"dynamic_password"`
 	PasswordExpiresAt int64   `json:"password_expires_at"`
-}
-
-func (n *NodeInfo) MarshalJSON() ([]byte, error) {
-	type Alias NodeInfo
-	return json.Marshal(&struct {
-		*Alias
-	}{
-		Alias: (*Alias)(n),
-	})
 }

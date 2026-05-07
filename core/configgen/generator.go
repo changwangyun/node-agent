@@ -1158,6 +1158,44 @@ func (g *Generator) RemoveUser(req DeployRequest) error {
 	return g.RemoveDeploy(req.UserID)
 }
 
+func (g *Generator) AddUsers(reqs []DeployRequest) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	for i := range reqs {
+		g.deploys[reqs[i].UserID] = &reqs[i]
+	}
+
+	cfg, _, err := g.rebuildConfig()
+	if err != nil {
+		return fmt.Errorf("rebuild config after add: %w", err)
+	}
+	g.current = cfg
+	return g.writeConfig(cfg)
+}
+
+func (g *Generator) RemoveUsers(reqs []DeployRequest) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	for _, req := range reqs {
+		delete(g.deploys, req.UserID)
+	}
+
+	if len(g.deploys) == 0 {
+		defaultCfg := g.generateDefault()
+		g.current = defaultCfg
+		return g.writeConfig(defaultCfg)
+	}
+
+	cfg, _, err := g.rebuildConfig()
+	if err != nil {
+		return fmt.Errorf("rebuild config after remove: %w", err)
+	}
+	g.current = cfg
+	return g.writeConfig(cfg)
+}
+
 func (g *Generator) Generate() (*SingBoxConfig, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()

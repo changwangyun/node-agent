@@ -9,25 +9,27 @@ import (
 )
 
 type DeviceInfo struct {
-	DeviceID  string    `json:"device_id"`
-	UserID    string    `json:"user_id"`
-	IP        string    `json:"ip"`
+	DeviceID    string    `json:"device_id"`
+	UserID      string    `json:"user_id"`
+	IP          string    `json:"ip"`
 	ConnectedAt time.Time `json:"connected_at"`
-	LastSeen  time.Time `json:"last_seen"`
+	LastSeen    time.Time `json:"last_seen"`
 }
 
 type DeviceLimiter struct {
-	mu       sync.RWMutex
-	cfg      *config.DeviceLimitConfig
-	devices  map[string]map[string]*DeviceInfo
-	sessions map[string]int
+	mu         sync.RWMutex
+	cfg        *config.DeviceLimitConfig
+	devices    map[string]map[string]*DeviceInfo
+	sessions   map[string]int
+	userLimits map[string]int
 }
 
 func NewDeviceLimiter(cfg *config.DeviceLimitConfig) *DeviceLimiter {
 	return &DeviceLimiter{
-		cfg:      cfg,
-		devices:  make(map[string]map[string]*DeviceInfo),
-		sessions: make(map[string]int),
+		cfg:        cfg,
+		devices:    make(map[string]map[string]*DeviceInfo),
+		sessions:   make(map[string]int),
+		userLimits: make(map[string]int),
 	}
 }
 
@@ -72,6 +74,13 @@ func (d *DeviceLimiter) RegisterDevice(userID, deviceID, ip string) (RegisterRes
 		return RegisterDeviceLimitExceeded, fmt.Errorf(
 			"user %s has %d devices, limit is %d",
 			userID, len(userDevices), d.cfg.MaxDevices,
+		)
+	}
+
+	if limit, ok := d.userLimits[userID]; ok && limit > 0 && len(userDevices) >= limit {
+		return RegisterDeviceLimitExceeded, fmt.Errorf(
+			"user %s has %d devices, per-user limit is %d",
+			userID, len(userDevices), limit,
 		)
 	}
 
@@ -195,4 +204,22 @@ func (d *DeviceLimiter) UpdateConfig(cfg *config.DeviceLimitConfig) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.cfg = cfg
+}
+
+func (d *DeviceLimiter) UpdateLimits(limits map[string]int) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.userLimits = make(map[string]int, len(limits))
+	for k, v := range limits {
+		d.userLimits[k] = v
+	}
+}
+
+func (d *DeviceLimiter) GetUserLimit(userID string) int {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	if limit, ok := d.userLimits[userID]; ok {
+		return limit
+	}
+	return d.cfg.MaxDevices
 }

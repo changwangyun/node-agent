@@ -3,6 +3,7 @@ module node-agent
 go 1.25.5
 
 require (
+	github.com/gorilla/websocket v1.5.3
 	github.com/shirou/gopsutil/v3 v3.23.12
 	github.com/v2fly/v2ray-core/v5 v5.49.0
 	google.golang.org/grpc v1.80.0
