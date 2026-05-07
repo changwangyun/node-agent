@@ -358,7 +358,7 @@ install_config() {
         return 0
     fi
 
-    local node_id panel_type
+    local panel_type
 
     echo ""
     echo -e "  ${CYAN}请选择面板类型:${NC}"
@@ -367,19 +367,18 @@ install_config() {
     read -rp "  请选择 [1]: " panel_type
     panel_type="${panel_type:-1}"
 
-    read -rp "请输入 Node ID [node-001]: " node_id
-    node_id="${node_id:-node-001}"
-
     if [ "$panel_type" = "2" ]; then
-        install_config_xboard "$node_id"
+        install_config_xboard
     else
-        install_config_laravel "$node_id"
+        install_config_laravel
     fi
 }
 
 install_config_laravel() {
-    local node_id="$1"
-    local api_token cp_url cp_token
+    local node_id api_token cp_url cp_token
+
+    read -rp "请输入 Node ID [node-001]: " node_id
+    node_id="${node_id:-node-001}"
 
     read -rp "请输入 API Token [自动生成]: " api_token
     if [ -z "$api_token" ]; then
@@ -428,7 +427,6 @@ EOF
 }
 
 install_config_xboard() {
-    local node_id="$1"
     local xb_host xb_key xb_node_id xb_node_type xb_interval
 
     read -rp "请输入 Xboard 面板地址 (例: https://panel.example.com): " xb_host
@@ -467,7 +465,7 @@ install_config_xboard() {
 
     cat > "${CONFIG_DIR}/config.json" << EOF
 {
-  "node_id": "${node_id}",
+  "node_id": "${xb_node_id}",
   "api_port": 8080,
   "api_token": "${xb_api_token}",
   "log_level": "info",
@@ -481,7 +479,7 @@ install_config_xboard() {
   "control_plane": {
     "url": "",
     "token": "",
-    "node_id": "${node_id}",
+    "node_id": "${xb_node_id}",
     "timeout": 10
   },
   "xboard": {
