@@ -58,6 +58,7 @@ type XboardSync struct {
 	lastUserMap   map[int]*UserInfo
 	lastNodeInfo  *NodeInfo
 	lastAliveUIDs map[int]bool
+	totalUsers    int
 
 	wsConnected bool
 }
@@ -139,6 +140,7 @@ func (s *XboardSync) onWSConfigUpdate(nodeInfo *NodeInfo, users []UserInfo) {
 	s.wsConnected = true
 
 	if nodeInfo != nil {
+		s.totalUsers = len(users)
 		s.deployNode(nodeInfo, users)
 	} else if len(users) > 0 && s.lastNodeInfo != nil {
 		s.deployNode(s.lastNodeInfo, users)
@@ -773,7 +775,7 @@ func (s *XboardSync) reportNodeStatus() {
 		"goroutines":         activeConnections,
 		"active_connections": activeConnections,
 		"total_connections":  totalIn + totalOut,
-		"total_users":        activeUsers,
+		"total_users":        s.totalUsers,
 		"active_users":       activeUsers,
 		"inbound_speed":      netIn,
 		"outbound_speed":     netOut,
@@ -841,7 +843,7 @@ func (s *XboardSync) collectMetrics() map[string]interface{} {
 		"active_connections": activeConnections,
 		"total_connections":  totalIn + totalOut,
 		"active_users":       activeUsers,
-		"total_users":        activeUsers,
+		"total_users":        s.totalUsers,
 		"kernel_status":      s.mgr.IsRunning(),
 	}
 
