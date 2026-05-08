@@ -68,6 +68,7 @@ func NewXboardSync(
 
 	wsClient.SetOnConfigUpdate(s.onWSConfigUpdate)
 	wsClient.SetOnDisconnected(s.onWSDisconnected)
+	wsClient.SetOnMetrics(s.collectMetrics)
 
 	return s
 }
@@ -80,19 +81,26 @@ func (s *XboardSync) Start() {
 
 	s.syncOnce()
 
-	go func() {
-		if err := s.wsClient.Connect(); err != nil {
-			log.Printf("[xboard] ws connect failed, using REST polling: %v", err)
-		}
-	}()
+	s.wsClient.Connect()
 
+	wsDiscoveryInterval := 5 * time.Minute
 	ticker := time.NewTicker(interval)
+	wsDiscoveryTicker := time.NewTicker(wsDiscoveryInterval)
 	defer ticker.Stop()
+	defer wsDiscoveryTicker.Stop()
 
 	for {
 		select {
 		case <-ticker.C:
+			if s.wsClient.IsConnected() {
+				s.reportAlive()
+				s.reportTraffic()
+				s.reportNodeStatus()
+				continue
+			}
 			s.syncOnce()
+		case <-wsDiscoveryTicker.C:
+			s.wsDiscovery()
 		case <-s.stopCh:
 			return
 		}
@@ -655,6 +663,86 @@ func (s *XboardSync) v2rayStats() *stats.V2RayStatsCollector {
 		return mc.GetV2RayStats()
 	}
 	return nil
+}
+
+func (s *XboardSync) collectMetrics() map[string]interface{} {
+	cpuPercent, err := utils.GetCPUUsage()
+	if err != nil {
+		cpuPercent = 0
+	}
+
+	memPercent, memUsedMB, memTotalMB := utils.GetMemoryUsage()
+	_ = memPercent
+
+	swapUsedMB, swapTotalMB := uint64(0), uint64(0)
+	if v, err := mem.SwapMemory(); err == nil {
+		swapUsedMB = v.Used / 1024 / 1024
+		swapTotalMB = v.Total / 1024 / 1024
+	}
+
+	diskUsedGB, diskTotalGB := utils.GetDiskUsage()
+	netIn, netOut := utils.GetNetSpeed()
+	gcMetrics := utils.GetGCMetrics()
+
+	load1, load5, load15 := utils.GetLoadAvg()
+
+	result := map[string]interface{}{
+		"cpu":         cpuPercent,
+		"cpu_percent": cpuPercent,
+		"mem": map[string]interface{}{
+			"total": int64(memTotalMB) * 1024 * 1024,
+			"used":  int64(memUsedMB) * 1024 * 1024,
+		},
+		"mem_percent":    memPercent,
+		"mem_used_mb":    memUsedMB,
+		"mem_total_mb":   memTotalMB,
+		"net_in_speed":   netIn,
+		"net_out_speed":  netOut,
+		"goroutines":     gcMetrics.Goroutines,
+		"num_gc":         gcMetrics.NumGC,
+		"last_pause_ms":  gcMetrics.LastPauseMS,
+		"load_1":         load1,
+		"load_5":         load5,
+		"load_15":        load15,
+		"kernel_running": s.mgr.IsRunning(),
+	}
+
+	if swapTotalMB > 0 {
+		result["swap"] = map[string]interface{}{
+			"total": int64(swapTotalMB) * 1024 * 1024,
+			"used":  int64(swapUsedMB) * 1024 * 1024,
+		}
+	}
+
+	if diskTotalGB > 0 {
+		result["disk"] = map[string]interface{}{
+			"total": int64(diskTotalGB) * 1024 * 1024 * 1024,
+			"used":  int64(diskUsedGB) * 1024 * 1024 * 1024,
+		}
+	}
+
+	return result
+}
+
+func (s *XboardSync) wsDiscovery() {
+	if s.wsClient.IsConnected() {
+		return
+	}
+
+	if err := s.wsClient.RefreshHandshake(); err != nil {
+		log.Printf("[xboard] ws discovery handshake failed: %v", err)
+		return
+	}
+
+	hs, err := s.wsClient.GetHandshakeResponse()
+	if err != nil || hs == nil {
+		return
+	}
+
+	if hs.WebSocket.Enabled && hs.WebSocket.WsURL != "" {
+		log.Printf("[xboard] ws discovery: websocket available, triggering reconnect")
+		s.wsClient.Connect()
+	}
 }
 
 type NodeInfo struct {

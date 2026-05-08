@@ -6,9 +6,13 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/rand"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -19,16 +23,16 @@ type HandshakeResponse struct {
 		Enabled bool   `json:"enabled"`
 		WsURL   string `json:"ws_url"`
 	} `json:"websocket"`
+	Settings struct {
+		PushInterval int `json:"push_interval"`
+		PullInterval int `json:"pull_interval"`
+	} `json:"settings"`
 }
 
-type WSMessage struct {
-	Type string          `json:"type"`
-	Data json.RawMessage `json:"data"`
-}
-
-type WSConfigUpdate struct {
-	NodeInfo *NodeInfo  `json:"node_info,omitempty"`
-	Users    []UserInfo `json:"users,omitempty"`
+type wsMessage struct {
+	Event     string          `json:"event"`
+	Data      json.RawMessage `json:"data,omitempty"`
+	Timestamp int64           `json:"timestamp,omitempty"`
 }
 
 type WSClient struct {
@@ -37,31 +41,33 @@ type WSClient struct {
 	nodeID   string
 	nodeType string
 
-	conn      *websocket.Conn
-	mu        sync.Mutex
-	connected bool
-	stopCh    chan struct{}
+	connected    atomic.Bool
+	writeCh      chan wsMessage
+	stopCh       chan struct{}
+	mu           sync.Mutex
+	conn         *websocket.Conn
+	reconnecting atomic.Bool
 
 	onConfigUpdate func(*NodeInfo, []UserInfo)
 	onDisconnected func()
+	onMetrics      func() map[string]interface{}
 
-	reconnectDelay time.Duration
-	maxDelay       time.Duration
+	handshakeDone bool
+	handshakeResp *HandshakeResponse
+	handshakeErr  error
+	handshakeMu   sync.Mutex
 
-	unsupported  bool
-	notifiedOnce bool
-	wsURL        string
+	disconnectAt time.Time
+	disconnectMu sync.RWMutex
 }
 
 func NewWSClient(apiHost, apiKey, nodeID, nodeType string) *WSClient {
 	return &WSClient{
-		apiHost:        apiHost,
-		apiKey:         apiKey,
-		nodeID:         nodeID,
-		nodeType:       nodeType,
-		stopCh:         make(chan struct{}),
-		reconnectDelay: 2 * time.Second,
-		maxDelay:       60 * time.Second,
+		apiHost:  apiHost,
+		apiKey:   apiKey,
+		nodeID:   nodeID,
+		nodeType: nodeType,
+		stopCh:   make(chan struct{}),
 	}
 }
 
@@ -73,105 +79,292 @@ func (w *WSClient) SetOnDisconnected(fn func()) {
 	w.onDisconnected = fn
 }
 
-func (w *WSClient) Connect() error {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	if w.connected || w.unsupported {
-		return nil
-	}
-
-	if w.wsURL == "" {
-		hs, err := w.doHandshake()
-		if err != nil {
-			if !w.notifiedOnce {
-				log.Printf("[xboard] WebSocket handshake failed: %v, trying direct connection", err)
-				w.notifiedOnce = true
-			}
-			w.wsURL = normalizeWSURL(w.apiHost)
-		} else if !hs.WebSocket.Enabled || hs.WebSocket.WsURL == "" {
-			if !w.notifiedOnce {
-				log.Printf("[xboard] WebSocket not enabled on panel, trying direct connection")
-				w.notifiedOnce = true
-			}
-			w.wsURL = normalizeWSURL(w.apiHost)
-		} else {
-			w.wsURL = normalizeWSURL(hs.WebSocket.WsURL)
-			log.Printf("[xboard] WebSocket URL from handshake: %s", w.wsURL)
-		}
-	}
-
-	header := http.Header{}
-	header.Set("Authorization", "Bearer "+w.apiKey)
-
-	dialer := websocket.Dialer{
-		HandshakeTimeout: 10 * time.Second,
-	}
-
-	conn, resp, err := dialer.Dial(w.wsURL, header)
-	if err != nil {
-		if resp != nil {
-			statusCode := resp.StatusCode
-			resp.Body.Close()
-			if statusCode == 404 || statusCode == 405 || statusCode == 501 {
-				w.unsupported = true
-				if !w.notifiedOnce {
-					log.Printf("[xboard] WebSocket not supported by panel (HTTP %d), using REST polling only", statusCode)
-					w.notifiedOnce = true
-				}
-				return nil
-			}
-		}
-
-		fallbackURL := normalizeWSURL(w.apiHost)
-		if fallbackURL != w.wsURL {
-			log.Printf("[xboard] ws dial %s failed: %v, trying fallback %s", w.wsURL, err, fallbackURL)
-			conn2, resp2, err2 := dialer.Dial(fallbackURL, header)
-			if err2 == nil {
-				if resp2 != nil {
-					resp2.Body.Close()
-				}
-				w.wsURL = fallbackURL
-				conn = conn2
-				goto connected
-			}
-			if resp2 != nil {
-				resp2.Body.Close()
-			}
-			log.Printf("[xboard] ws fallback also failed: %v", err2)
-		}
-
-		return fmt.Errorf("dial ws %s: %w", w.wsURL, err)
-	}
-
-connected:
-	w.conn = conn
-	w.connected = true
-
-	go w.readLoop()
-	go w.pingLoop()
-
-	log.Printf("[xboard-ws] connected to %s", w.wsURL)
-	return nil
+func (w *WSClient) SetOnMetrics(fn func() map[string]interface{}) {
+	w.onMetrics = fn
 }
 
-func (w *WSClient) doHandshake() (*HandshakeResponse, error) {
+func (w *WSClient) GetHandshakeResponse() (*HandshakeResponse, error) {
+	w.handshakeMu.Lock()
+	defer w.handshakeMu.Unlock()
+	return w.handshakeResp, w.handshakeErr
+}
+
+func (w *WSClient) IsConnected() bool {
+	return w.connected.Load()
+}
+
+func (w *WSClient) DisconnectDuration() time.Duration {
+	w.disconnectMu.RLock()
+	defer w.disconnectMu.RUnlock()
+	if w.disconnectAt.IsZero() {
+		return 0
+	}
+	return time.Since(w.disconnectAt)
+}
+
+func (w *WSClient) Connect() {
+	if w.reconnecting.Swap(true) {
+		return
+	}
+	go w.run()
+}
+
+func (w *WSClient) run() {
+	defer w.reconnecting.Store(false)
+
+	backoff := 2 * time.Second
+	maxBackoff := 60 * time.Second
+
+	for {
+		start := time.Now()
+		err := w.connect()
+		wasConnected := w.connected.Swap(false)
+
+		w.disconnectMu.Lock()
+		if wasConnected || w.disconnectAt.IsZero() {
+			w.disconnectAt = time.Now()
+		}
+		w.disconnectMu.Unlock()
+
+		if wasConnected && w.onDisconnected != nil {
+			w.onDisconnected()
+		}
+
+		if err != nil {
+			if !wasConnected {
+				log.Printf("[xboard] ws connect failed, using REST polling: %v", err)
+			}
+		}
+
+		select {
+		case <-w.stopCh:
+			return
+		default:
+		}
+
+		if time.Since(start) > 2*time.Minute {
+			backoff = 2 * time.Second
+		}
+
+		jitter := time.Duration(rand.Int63n(int64(backoff / 5)))
+		wait := backoff + jitter
+
+		timer := time.NewTimer(wait)
+		select {
+		case <-w.stopCh:
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+
+		if backoff < maxBackoff {
+			backoff *= 2
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+			}
+		}
+	}
+}
+
+func (w *WSClient) connect() error {
+	if err := w.ensureHandshake(); err != nil {
+		return fmt.Errorf("handshake: %w", err)
+	}
+
+	hs := w.handshakeResp
+	if hs == nil || !hs.WebSocket.Enabled || hs.WebSocket.WsURL == "" {
+		return fmt.Errorf("websocket not enabled on panel")
+	}
+
+	wsURL := normalizeWSURL(hs.WebSocket.WsURL)
+
+	candidates := []string{wsURL}
+	if fallback := deriveWSURLFromAPIHost(w.apiHost); fallback != "" && fallback != wsURL {
+		candidates = append(candidates, fallback)
+	}
+
+	var conn *websocket.Conn
+	var dialErr error
+
+	for _, candidate := range candidates {
+		u, err := url.Parse(candidate)
+		if err != nil {
+			dialErr = fmt.Errorf("parse ws url: %w", err)
+			continue
+		}
+
+		q := u.Query()
+		q.Set("token", w.apiKey)
+		q.Set("node_id", w.nodeID)
+		u.RawQuery = q.Encode()
+
+		log.Printf("[xboard] ws connecting to %s", u.String())
+
+		dialer := websocket.Dialer{
+			HandshakeTimeout: 15 * time.Second,
+		}
+
+		conn, _, err = dialer.Dial(u.String(), nil)
+		if err == nil {
+			wsURL = candidate
+			dialErr = nil
+			break
+		}
+		dialErr = fmt.Errorf("dial: %w", err)
+		log.Printf("[xboard] ws dial failed for %s: %v", candidate, err)
+	}
+
+	if dialErr != nil {
+		return dialErr
+	}
+
+	conn.SetReadLimit(10 << 20)
+
+	var firstMsg wsMessage
+	if err := conn.ReadJSON(&firstMsg); err != nil {
+		conn.Close()
+		return fmt.Errorf("read auth response: %w", err)
+	}
+
+	log.Printf("[xboard-ws] auth response: event=%s", firstMsg.Event)
+
+	if firstMsg.Event == "error" {
+		conn.Close()
+		var errData struct {
+			Message string `json:"message"`
+		}
+		if err := json.Unmarshal(firstMsg.Data, &errData); err != nil {
+			return fmt.Errorf("auth failed (unable to parse error: %v)", err)
+		}
+		return fmt.Errorf("auth failed: %s", errData.Message)
+	}
+
+	if firstMsg.Event != "auth.success" {
+		w.handleMessage(firstMsg)
+	}
+
+	w.mu.Lock()
+	w.conn = conn
+	w.mu.Unlock()
+
+	w.connected.Store(true)
+
+	w.disconnectMu.Lock()
+	w.disconnectAt = time.Time{}
+	w.disconnectMu.Unlock()
+
+	writeCh := make(chan wsMessage, 16)
+	w.writeCh = writeCh
+
+	errCh := make(chan error, 1)
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+		for {
+			var msg wsMessage
+			if err := conn.ReadJSON(&msg); err != nil {
+				select {
+				case errCh <- err:
+				default:
+				}
+				return
+			}
+			w.handleMessage(msg)
+			if msg.Event == "ping" {
+				select {
+				case writeCh <- wsMessage{Event: "pong"}:
+				default:
+				}
+			}
+		}
+	}()
+
+	statusInterval := 60 * time.Second
+	if hs.Settings.PushInterval > 0 {
+		statusInterval = time.Duration(hs.Settings.PushInterval) * time.Second
+	}
+	reportTicker := time.NewTicker(statusInterval)
+	defer reportTicker.Stop()
+
+	log.Printf("[xboard-ws] connected to %s", wsURL)
+
+	for {
+		select {
+		case <-w.stopCh:
+			conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+			conn.WriteMessage(websocket.CloseMessage,
+				websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+			<-done
+			return nil
+		case err := <-errCh:
+			conn.Close()
+			<-done
+			return fmt.Errorf("read: %w", err)
+		case <-reportTicker.C:
+			if w.onMetrics != nil {
+				stats := w.onMetrics()
+				if stats != nil {
+					data, _ := json.Marshal(stats)
+					msg := wsMessage{
+						Event:     "node.status",
+						Data:      data,
+						Timestamp: time.Now().Unix(),
+					}
+					select {
+					case writeCh <- msg:
+					default:
+					}
+				}
+			}
+		case msg := <-writeCh:
+			conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			if err := conn.WriteJSON(msg); err != nil {
+				conn.Close()
+				<-done
+				return fmt.Errorf("write: %w", err)
+			}
+		}
+	}
+}
+
+func (w *WSClient) ensureHandshake() error {
+	w.handshakeMu.Lock()
+	if w.handshakeDone {
+		w.handshakeMu.Unlock()
+		return w.handshakeErr
+	}
+	w.handshakeMu.Unlock()
+
+	w.handshakeMu.Lock()
+	defer w.handshakeMu.Unlock()
+
+	if w.handshakeDone {
+		return w.handshakeErr
+	}
+
+	w.handshakeDone = true
+
 	handshakeURL := w.apiHost + "/api/v2/server/handshake"
 
 	payload := map[string]interface{}{
-		"token":     w.apiKey,
-		"node_id":   w.nodeID,
-		"node_type": w.nodeType,
+		"token":   w.apiKey,
+		"node_id": w.nodeID,
+	}
+	if w.nodeType != "" {
+		payload["node_type"] = w.nodeType
 	}
 
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return nil, fmt.Errorf("marshal handshake payload: %w", err)
+		w.handshakeErr = fmt.Errorf("marshal handshake payload: %w", err)
+		return w.handshakeErr
 	}
 
 	req, err := http.NewRequest("POST", handshakeURL, bytes.NewReader(body))
 	if err != nil {
-		return nil, fmt.Errorf("create handshake request: %w", err)
+		w.handshakeErr = fmt.Errorf("create handshake request: %w", err)
+		return w.handshakeErr
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
@@ -179,7 +372,8 @@ func (w *WSClient) doHandshake() (*HandshakeResponse, error) {
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("handshake request: %w", err)
+		w.handshakeErr = fmt.Errorf("handshake request: %w", err)
+		return w.handshakeErr
 	}
 	defer func() {
 		io.Copy(io.Discard, resp.Body)
@@ -188,15 +382,30 @@ func (w *WSClient) doHandshake() (*HandshakeResponse, error) {
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return nil, fmt.Errorf("handshake status %d: %s", resp.StatusCode, respBody)
+		w.handshakeErr = fmt.Errorf("handshake status %d: %s", resp.StatusCode, respBody)
+		return w.handshakeErr
 	}
 
 	var hs HandshakeResponse
 	if err := json.NewDecoder(resp.Body).Decode(&hs); err != nil {
-		return nil, fmt.Errorf("decode handshake: %w", err)
+		w.handshakeErr = fmt.Errorf("decode handshake: %w", err)
+		return w.handshakeErr
 	}
 
-	return &hs, nil
+	w.handshakeResp = &hs
+	log.Printf("[xboard] handshake ok, ws_enabled=%v ws_url=%s push_interval=%d pull_interval=%d",
+		hs.WebSocket.Enabled, hs.WebSocket.WsURL, hs.Settings.PushInterval, hs.Settings.PullInterval)
+	return nil
+}
+
+func (w *WSClient) RefreshHandshake() error {
+	w.handshakeMu.Lock()
+	w.handshakeDone = false
+	w.handshakeResp = nil
+	w.handshakeErr = nil
+	w.handshakeMu.Unlock()
+
+	return w.ensureHandshake()
 }
 
 func normalizeWSURL(raw string) string {
@@ -213,19 +422,123 @@ func normalizeWSURL(raw string) string {
 	return s
 }
 
-func (w *WSClient) Disconnect() {
-	w.mu.Lock()
-	defer w.mu.Unlock()
+func deriveWSURLFromAPIHost(apiHost string) string {
+	s := strings.TrimRight(apiHost, "/")
+	switch {
+	case strings.HasPrefix(s, "https://"):
+		return "wss://" + s[8:]
+	case strings.HasPrefix(s, "http://"):
+		return "ws://" + s[7:]
+	}
+	return ""
+}
 
-	if !w.connected {
+func (w *WSClient) handleMessage(msg wsMessage) {
+	switch msg.Event {
+	case "sync.config":
+		var payload struct {
+			Config    NodeInfo `json:"config"`
+			Timestamp int64    `json:"timestamp"`
+			NodeID    int      `json:"node_id"`
+		}
+		if err := json.Unmarshal(msg.Data, &payload); err != nil {
+			log.Printf("[xboard-ws] failed to parse sync.config: %v", err)
+			return
+		}
+		if w.onConfigUpdate != nil {
+			w.onConfigUpdate(&payload.Config, nil)
+		}
+
+	case "sync.users":
+		var payload struct {
+			Users     []UserInfo `json:"users"`
+			Timestamp int64      `json:"timestamp"`
+			NodeID    int        `json:"node_id"`
+		}
+		if err := json.Unmarshal(msg.Data, &payload); err != nil {
+			log.Printf("[xboard-ws] failed to parse sync.users: %v", err)
+			return
+		}
+		if w.onConfigUpdate != nil {
+			w.onConfigUpdate(nil, payload.Users)
+		}
+
+	case "sync.user.delta":
+		var payload struct {
+			Action    string     `json:"action"`
+			Users     []UserInfo `json:"users"`
+			Timestamp int64      `json:"timestamp"`
+			NodeID    int        `json:"node_id"`
+		}
+		if err := json.Unmarshal(msg.Data, &payload); err != nil {
+			log.Printf("[xboard-ws] failed to parse sync.user.delta: %v", err)
+			return
+		}
+		if w.onConfigUpdate != nil {
+			w.onConfigUpdate(nil, payload.Users)
+		}
+
+	case "auth.success":
+	case "pong":
+	default:
+		log.Printf("[xboard-ws] unknown event: %s", msg.Event)
+	}
+}
+
+func (w *WSClient) SendDeviceReport(devices map[int][]string) {
+	if !w.connected.Load() {
 		return
 	}
 
-	w.connected = false
+	payload := map[string]interface{}{
+		"devices": devices,
+	}
+
+	d, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+
+	msg := wsMessage{
+		Event:     "report.devices",
+		Data:      d,
+		Timestamp: time.Now().Unix(),
+	}
+
+	select {
+	case w.writeCh <- msg:
+	default:
+		log.Printf("[xboard-ws] write channel full, skipping device report")
+	}
+}
+
+func (w *WSClient) SendNodeStatus(stats map[string]interface{}) {
+	if !w.connected.Load() || stats == nil {
+		return
+	}
+
+	data, _ := json.Marshal(stats)
+	msg := wsMessage{
+		Event:     "node.status",
+		Data:      data,
+		Timestamp: time.Now().Unix(),
+	}
+
+	select {
+	case w.writeCh <- msg:
+	default:
+		log.Printf("[xboard-ws] write channel full, skipping node status")
+	}
+}
+
+func (w *WSClient) Disconnect() {
+	w.mu.Lock()
 	if w.conn != nil {
 		w.conn.Close()
 		w.conn = nil
 	}
+	w.mu.Unlock()
+	w.connected.Store(false)
 }
 
 func (w *WSClient) Stop() {
@@ -233,135 +546,9 @@ func (w *WSClient) Stop() {
 	w.Disconnect()
 }
 
-func (w *WSClient) IsConnected() bool {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.connected
-}
-
-func (w *WSClient) readLoop() {
-	defer func() {
-		w.handleDisconnect()
-	}()
-
-	for {
-		select {
-		case <-w.stopCh:
-			return
-		default:
-		}
-
-		w.mu.Lock()
-		conn := w.conn
-		w.mu.Unlock()
-
-		if conn == nil {
-			return
-		}
-
-		_, message, err := conn.ReadMessage()
-		if err != nil {
-			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
-				log.Printf("[xboard-ws] read error: %v", err)
-			}
-			return
-		}
-
-		var msg WSMessage
-		if err := json.Unmarshal(message, &msg); err != nil {
-			log.Printf("[xboard-ws] failed to parse message: %v", err)
-			continue
-		}
-
-		switch msg.Type {
-		case "config_update", "user_update", "update":
-			var update WSConfigUpdate
-			if err := json.Unmarshal(msg.Data, &update); err != nil {
-				log.Printf("[xboard-ws] failed to parse config update: %v", err)
-				continue
-			}
-			if w.onConfigUpdate != nil {
-				w.onConfigUpdate(update.NodeInfo, update.Users)
-			}
-		case "ping":
-			w.sendPong()
-		default:
-			log.Printf("[xboard-ws] unknown message type: %s", msg.Type)
-		}
+func intIDToString(id string) string {
+	if _, err := strconv.Atoi(id); err == nil {
+		return id
 	}
-}
-
-func (w *WSClient) pingLoop() {
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			w.mu.Lock()
-			conn := w.conn
-			w.mu.Unlock()
-
-			if conn != nil {
-				conn.WriteMessage(websocket.PingMessage, nil)
-			}
-		case <-w.stopCh:
-			return
-		}
-	}
-}
-
-func (w *WSClient) sendPong() {
-	w.mu.Lock()
-	conn := w.conn
-	w.mu.Unlock()
-
-	if conn != nil {
-		conn.WriteMessage(websocket.PongMessage, nil)
-	}
-}
-
-func (w *WSClient) handleDisconnect() {
-	w.mu.Lock()
-	w.connected = false
-	if w.conn != nil {
-		w.conn.Close()
-		w.conn = nil
-	}
-	w.mu.Unlock()
-
-	if w.onDisconnected != nil {
-		w.onDisconnected()
-	}
-
-	if !w.unsupported {
-		go w.reconnect()
-	}
-}
-
-func (w *WSClient) reconnect() {
-	delay := w.reconnectDelay
-
-	for {
-		select {
-		case <-w.stopCh:
-			return
-		case <-time.After(delay):
-		}
-
-		if w.unsupported {
-			return
-		}
-
-		log.Printf("[xboard-ws] reconnecting...")
-		if err := w.Connect(); err == nil {
-			return
-		}
-
-		delay *= 2
-		if delay > w.maxDelay {
-			delay = w.maxDelay
-		}
-		log.Printf("[xboard-ws] reconnect failed, retrying in %v", delay)
-	}
+	return id
 }
