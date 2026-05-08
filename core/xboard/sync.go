@@ -58,6 +58,7 @@ type XboardSync struct {
 
 	lastUserMap   map[int]*UserInfo
 	lastNodeInfo  *NodeInfo
+	lastUsers     []UserInfo
 	lastAliveUIDs map[int]bool
 	totalUsers    int
 
@@ -174,11 +175,17 @@ func (s *XboardSync) syncOnce() {
 		if err.Error() != "not modified" {
 			log.Printf("[xboard] failed to get user list: %v", err)
 		}
-		return
+		users = s.lastUsers
 	}
 
 	if nodeInfo != nil {
+		s.totalUsers = len(users)
+		s.lastUsers = users
 		s.deployNode(nodeInfo, users)
+	} else if len(users) > 0 && s.lastNodeInfo != nil {
+		s.totalUsers = len(users)
+		s.lastUsers = users
+		s.deployNode(s.lastNodeInfo, users)
 	}
 
 	s.reportAlive()
@@ -877,39 +884,46 @@ func (s *XboardSync) collectMetrics() map[string]interface{} {
 	uptime := utils.GetUptime()
 
 	result := map[string]interface{}{
-		"node_id":            s.cfg.Xboard.NodeID,
-		"cpu":                cpuPercent,
-		"memory":             float64(memUsedMB),
-		"disk":               float64(diskUsedGB),
-		"online":             activeUsers,
-		"network_in":         totalIn,
-		"network_out":        totalOut,
-		"network_in_speed":   netIn,
-		"network_out_speed":  netOut,
-		"uptime":             uptime,
-		"active_connections": activeConnections,
-		"total_connections":  totalIn + totalOut,
-		"active_users":       activeUsers,
-		"total_users":        s.totalUsers,
-		"kernel_status":      s.mgr.IsRunning(),
-		"goroutines":         runtime.NumGoroutine(),
-		"api": map[string]interface{}{
-			"status":           "running",
-			"latency_ms":       0,
-			"requests_per_sec": 0,
+		"node_id": s.cfg.Xboard.NodeID,
+		"cpu":     cpuPercent,
+		"memory":  float64(memUsedMB),
+		"disk":    float64(diskUsedGB),
+		"online":  activeUsers,
+		"metrics": map[string]interface{}{
+			"uptime":             uptime,
+			"goroutines":         runtime.NumGoroutine(),
+			"active_connections": activeConnections,
+			"total_connections":  totalIn + totalOut,
+			"total_users":        s.totalUsers,
+			"active_users":       activeUsers,
+			"inbound_speed":      netIn,
+			"outbound_speed":     netOut,
+			"kernel_status":      s.mgr.IsRunning(),
+			"api": map[string]interface{}{
+				"status":           "running",
+				"latency_ms":       0,
+				"requests_per_sec": 0,
+			},
+			"ws": map[string]interface{}{
+				"connections": func() int {
+					if s.wsClient.IsConnected() {
+						return 1
+					}
+					return 0
+				}(),
+			},
+			"gc": map[string]interface{}{
+				"paused_ms": 0,
+			},
+			"speed_limiter": []string{},
 		},
-		"ws": map[string]interface{}{
-			"connections": func() int {
-				if s.wsClient.IsConnected() {
-					return 1
-				}
-				return 0
-			}(),
-		},
-		"gc": map[string]interface{}{
-			"paused_ms": 0,
-		},
-		"speed_limiter": []string{},
+	}
+
+	if load1, load5, load15 := utils.GetLoadAvg(); load1 > 0 || load5 > 0 || load15 > 0 {
+		result["metrics"].(map[string]interface{})["load"] = []float64{load1, load5, load15}
+	}
+	if cpuPerCore, _ := utils.GetCPUPerCore(); len(cpuPerCore) > 0 {
+		result["metrics"].(map[string]interface{})["cpu_per_core"] = cpuPerCore
 	}
 
 	return result
