@@ -480,6 +480,8 @@ func (w *WSClient) handleMessage(msg wsMessage) {
 
 	case "auth.success":
 	case "pong":
+	case "ping":
+		w.sendPong()
 	default:
 		log.Printf("[xboard-ws] unknown event: %s", msg.Event)
 	}
@@ -528,6 +530,16 @@ func (w *WSClient) SendNodeStatus(stats map[string]interface{}) {
 	case w.writeCh <- msg:
 	default:
 		log.Printf("[xboard-ws] write channel full, skipping node status")
+	}
+}
+
+func (w *WSClient) sendPong() {
+	if !w.connected.Load() {
+		return
+	}
+	select {
+	case w.writeCh <- wsMessage{Event: "pong"}:
+	default:
 	}
 }
 
