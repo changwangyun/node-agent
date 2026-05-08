@@ -263,6 +263,40 @@ func (c *XboardClient) GetNodeInfo() (*NodeInfo, error) {
 		}
 	}
 
+	if certConfig, ok := data["cert_config"].(map[string]interface{}); ok {
+		cc := &CertConfig{}
+		if v, ok := certConfig["cert_mode"].(string); ok {
+			cc.CertMode = v
+		}
+		if v, ok := certConfig["cert_file"].(string); ok {
+			cc.CertFile = v
+		}
+		if v, ok := certConfig["key_file"].(string); ok {
+			cc.KeyFile = v
+		}
+		if v, ok := certConfig["cert_content"].(string); ok {
+			cc.CertContent = v
+		}
+		if v, ok := certConfig["key_content"].(string); ok {
+			cc.KeyContent = v
+		}
+		if acme, ok := certConfig["acme"].(map[string]interface{}); ok {
+			ac := &ACMEConfig{}
+			if v, ok := acme["email"].(string); ok {
+				ac.Email = v
+			}
+			if domains, ok := acme["domains"].([]interface{}); ok {
+				for _, d := range domains {
+					if ds, ok := d.(string); ok {
+						ac.Domains = append(ac.Domains, ds)
+					}
+				}
+			}
+			cc.ACME = ac
+		}
+		nodeInfo.CertConfig = cc
+	}
+
 	if routes, ok := data["routes"].([]interface{}); ok {
 		for _, r := range routes {
 			if routeMap, ok := r.(map[string]interface{}); ok {

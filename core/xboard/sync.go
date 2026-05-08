@@ -355,7 +355,50 @@ func (s *XboardSync) isNodeConfigChanged(newInfo *NodeInfo) bool {
 		old.CertPath != newInfo.CertPath ||
 		old.KeyPath != newInfo.KeyPath ||
 		old.ACMEDomain != newInfo.ACMEDomain ||
-		old.ACMEEmail != newInfo.ACMEEmail
+		old.ACMEEmail != newInfo.ACMEEmail ||
+		old.CertConfig != nil && newInfo.CertConfig != nil && (old.CertConfig.CertMode != newInfo.CertConfig.CertMode ||
+			old.CertConfig.CertFile != newInfo.CertConfig.CertFile ||
+			old.CertConfig.KeyFile != newInfo.CertConfig.KeyFile ||
+			old.CertConfig.CertContent != newInfo.CertConfig.CertContent ||
+			old.CertConfig.KeyContent != newInfo.CertConfig.KeyContent)
+}
+
+func (s *XboardSync) applyCertConfig(nodeInfo *NodeInfo, req *configgen.DeployRequest) {
+	if nodeInfo.CertConfig == nil || nodeInfo.CertConfig.CertMode == "none" {
+		return
+	}
+
+	cc := nodeInfo.CertConfig
+	switch cc.CertMode {
+	case "acme":
+		if cc.ACME != nil {
+			if len(cc.ACME.Domains) > 0 {
+				req.ACMEDomain = cc.ACME.Domains[0]
+			}
+			req.ACMEEmail = cc.ACME.Email
+		}
+	case "remote":
+		if cc.CertFile != "" && cc.KeyFile != "" {
+			req.TLSCertPath = cc.CertFile
+			req.TLSKeyPath = cc.KeyFile
+		}
+	case "local":
+		if cc.CertContent != "" && cc.KeyContent != "" {
+			req.TLSCertContent = cc.CertContent
+			req.TLSKeyContent = cc.KeyContent
+		}
+	default:
+		if cc.CertContent != "" && cc.KeyContent != "" {
+			req.TLSCertContent = cc.CertContent
+			req.TLSKeyContent = cc.KeyContent
+		} else if cc.CertFile != "" && cc.KeyFile != "" {
+			req.TLSCertPath = cc.CertFile
+			req.TLSKeyPath = cc.KeyFile
+		} else if cc.ACME != nil && len(cc.ACME.Domains) > 0 {
+			req.ACMEDomain = cc.ACME.Domains[0]
+			req.ACMEEmail = cc.ACME.Email
+		}
+	}
 }
 
 func (s *XboardSync) buildDeployRequest(u UserInfo, nodeInfo *NodeInfo) *configgen.DeployRequest {
@@ -413,16 +456,7 @@ func (s *XboardSync) buildDeployRequest(u UserInfo, nodeInfo *NodeInfo) *configg
 			req.Masquerade = nodeInfo.Masquerade
 		}
 		if nodeInfo.TLS == 1 {
-			if nodeInfo.ACMEDomain != "" {
-				req.ACMEDomain = nodeInfo.ACMEDomain
-				req.ACMEEmail = nodeInfo.ACMEEmail
-			} else if nodeInfo.CertContent != "" && nodeInfo.KeyContent != "" {
-				req.TLSCertContent = nodeInfo.CertContent
-				req.TLSKeyContent = nodeInfo.KeyContent
-			} else if nodeInfo.CertPath != "" {
-				req.TLSCertPath = nodeInfo.CertPath
-				req.TLSKeyPath = nodeInfo.KeyPath
-			}
+			s.applyCertConfig(nodeInfo, req)
 		}
 		if nodeInfo.ObfsType != "" {
 			req.ObfsType = nodeInfo.ObfsType
@@ -432,16 +466,7 @@ func (s *XboardSync) buildDeployRequest(u UserInfo, nodeInfo *NodeInfo) *configg
 	case "vless":
 		req.Protocol = "vless"
 		if nodeInfo.TLS == 1 {
-			if nodeInfo.ACMEDomain != "" {
-				req.ACMEDomain = nodeInfo.ACMEDomain
-				req.ACMEEmail = nodeInfo.ACMEEmail
-			} else if nodeInfo.CertContent != "" && nodeInfo.KeyContent != "" {
-				req.TLSCertContent = nodeInfo.CertContent
-				req.TLSKeyContent = nodeInfo.KeyContent
-			} else if nodeInfo.CertPath != "" {
-				req.TLSCertPath = nodeInfo.CertPath
-				req.TLSKeyPath = nodeInfo.KeyPath
-			}
+			s.applyCertConfig(nodeInfo, req)
 		}
 		if nodeInfo.Network == "ws" {
 			req.ObfsType = "ws"
@@ -476,16 +501,7 @@ func (s *XboardSync) buildDeployRequest(u UserInfo, nodeInfo *NodeInfo) *configg
 	case "trojan":
 		req.Protocol = "trojan"
 		if nodeInfo.TLS == 1 {
-			if nodeInfo.ACMEDomain != "" {
-				req.ACMEDomain = nodeInfo.ACMEDomain
-				req.ACMEEmail = nodeInfo.ACMEEmail
-			} else if nodeInfo.CertContent != "" && nodeInfo.KeyContent != "" {
-				req.TLSCertContent = nodeInfo.CertContent
-				req.TLSKeyContent = nodeInfo.KeyContent
-			} else if nodeInfo.CertPath != "" {
-				req.TLSCertPath = nodeInfo.CertPath
-				req.TLSKeyPath = nodeInfo.KeyPath
-			}
+			s.applyCertConfig(nodeInfo, req)
 		}
 		if nodeInfo.ObfsType != "" {
 			req.ObfsType = nodeInfo.ObfsType
@@ -823,6 +839,8 @@ type NodeInfo struct {
 	ACMEDomain  string `json:"acme_domain"`
 	ACMEEmail   string `json:"acme_email"`
 
+	CertConfig *CertConfig `json:"cert_config"`
+
 	WSPath          string                 `json:"ws_path"`
 	WSHost          string                 `json:"ws_host"`
 	GRPCServiceName string                 `json:"grpc_service_name"`
@@ -830,6 +848,20 @@ type NodeInfo struct {
 	ObfsType        string                 `json:"obfs_type"`
 	ObfsPass        string                 `json:"obfs_password"`
 	NetworkSettings map[string]interface{} `json:"network_settings"`
+}
+
+type CertConfig struct {
+	CertMode    string      `json:"cert_mode"`
+	CertFile    string      `json:"cert_file"`
+	KeyFile     string      `json:"key_file"`
+	CertContent string      `json:"cert_content"`
+	KeyContent  string      `json:"key_content"`
+	ACME        *ACMEConfig `json:"acme"`
+}
+
+type ACMEConfig struct {
+	Domains []string `json:"domains"`
+	Email   string   `json:"email"`
 }
 
 type RouteConfig struct {
