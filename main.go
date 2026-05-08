@@ -67,7 +67,11 @@ func main() {
 	multiCollector.SetV2RayStats(v2rayStatsCollector)
 
 	limiter := device.NewDeviceLimiter(&cfg.DeviceLimit)
-	reporter := heartbeat.NewReporter(cfg, mgr, multiCollector, limiter)
+
+	var reporter *heartbeat.Reporter
+	if !cfg.IsXboardMode() {
+		reporter = heartbeat.NewReporter(cfg, mgr, multiCollector, limiter)
+	}
 
 	handler := controller.NewHandler(mgr, generator, multiCollector, v2rayStatsCollector, limiter, reporter)
 

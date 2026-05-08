@@ -262,6 +262,10 @@ func (h *Handler) GetOnlineUsers(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) Heartbeat(w http.ResponseWriter, r *http.Request) {
+	if h.reporter == nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"status": "ok", "mode": "xboard"})
+		return
+	}
 	payload := h.reporter.GetPayload()
 	writeJSON(w, http.StatusOK, payload)
 }
