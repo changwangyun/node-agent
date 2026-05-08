@@ -5,11 +5,22 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
 )
+
+func getMapKeys(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	return keys
+}
 
 type XboardClient struct {
 	apiHost  string
@@ -141,6 +152,8 @@ func (c *XboardClient) GetNodeInfo() (*NodeInfo, error) {
 	if err := json.Unmarshal(body, &raw); err != nil {
 		return nil, fmt.Errorf("parse response: %w", err)
 	}
+
+	log.Printf("[xboard] raw config response keys: %v", getMapKeys(raw))
 
 	data := raw
 
