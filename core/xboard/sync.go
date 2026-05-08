@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -773,7 +774,7 @@ func (s *XboardSync) reportNodeStatus() {
 
 	metrics := map[string]interface{}{
 		"uptime":             uptime,
-		"goroutines":         activeConnections,
+		"goroutines":         runtime.NumGoroutine(),
 		"active_connections": activeConnections,
 		"total_connections":  totalIn + totalOut,
 		"total_users":        s.totalUsers,
@@ -781,6 +782,23 @@ func (s *XboardSync) reportNodeStatus() {
 		"inbound_speed":      netIn,
 		"outbound_speed":     netOut,
 		"kernel_status":      s.mgr.IsRunning(),
+		"api": map[string]interface{}{
+			"status":           "running",
+			"latency_ms":       0,
+			"requests_per_sec": 0,
+		},
+		"ws": map[string]interface{}{
+			"connections": func() int {
+				if s.wsClient.IsConnected() {
+					return 1
+				}
+				return 0
+			}(),
+		},
+		"gc": map[string]interface{}{
+			"paused_ms": 0,
+		},
+		"speed_limiter": []string{},
 	}
 
 	if len(cpuPerCore) > 0 {
@@ -874,6 +892,24 @@ func (s *XboardSync) collectMetrics() map[string]interface{} {
 		"active_users":       activeUsers,
 		"total_users":        s.totalUsers,
 		"kernel_status":      s.mgr.IsRunning(),
+		"goroutines":         runtime.NumGoroutine(),
+		"api": map[string]interface{}{
+			"status":           "running",
+			"latency_ms":       0,
+			"requests_per_sec": 0,
+		},
+		"ws": map[string]interface{}{
+			"connections": func() int {
+				if s.wsClient.IsConnected() {
+					return 1
+				}
+				return 0
+			}(),
+		},
+		"gc": map[string]interface{}{
+			"paused_ms": 0,
+		},
+		"speed_limiter": []string{},
 	}
 
 	return result
