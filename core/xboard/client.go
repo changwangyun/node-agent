@@ -23,6 +23,22 @@ type XboardClient struct {
 	etags map[string]string
 }
 
+func toFloat64(v interface{}) (float64, bool) {
+	switch val := v.(type) {
+	case float64:
+		return val, true
+	case string:
+		if f, err := strconv.ParseFloat(val, 64); err == nil {
+			return f, true
+		}
+	case json.Number:
+		if f, err := val.Float64(); err == nil {
+			return f, true
+		}
+	}
+	return 0, false
+}
+
 func NewXboardClient(apiHost, apiKey string, nodeID string, nodeType string, timeout int) *XboardClient {
 	t := time.Duration(timeout) * time.Second
 	if t < 5*time.Second {
@@ -136,18 +152,12 @@ func (c *XboardClient) GetNodeInfo() (*NodeInfo, error) {
 	if v, ok := data["server"].(string); ok && nodeInfo.Host == "" {
 		nodeInfo.Host = v
 	}
-	if v, ok := data["port"].(float64); ok {
+	if v, ok := toFloat64(data["port"]); ok {
 		nodeInfo.Port = FlexibleInt(v)
-	} else if v, ok := data["port"].(string); ok {
-		if p, err := strconv.Atoi(v); err == nil {
-			nodeInfo.Port = FlexibleInt(p)
-		}
 	}
-	if v, ok := data["server_port"].(float64); ok && nodeInfo.Port == 0 {
-		nodeInfo.Port = FlexibleInt(v)
-	} else if v, ok := data["server_port"].(string); ok && nodeInfo.Port == 0 {
-		if p, err := strconv.Atoi(v); err == nil {
-			nodeInfo.Port = FlexibleInt(p)
+	if nodeInfo.Port == 0 {
+		if v, ok := toFloat64(data["server_port"]); ok {
+			nodeInfo.Port = FlexibleInt(v)
 		}
 	}
 	if v, ok := data["server_name"].(string); ok {
@@ -163,16 +173,16 @@ func (c *XboardClient) GetNodeInfo() (*NodeInfo, error) {
 	if v, ok := data["transport"].(string); ok {
 		nodeInfo.Transport = v
 	}
-	if v, ok := data["tls"].(float64); ok {
+	if v, ok := toFloat64(data["tls"]); ok {
 		nodeInfo.TLS = int(v)
 	}
-	if v, ok := data["speed_limit"].(float64); ok {
+	if v, ok := toFloat64(data["speed_limit"]); ok {
 		nodeInfo.SpeedLimit = int64(v)
 	}
 	if v, ok := data["node_secret"].(string); ok {
 		nodeInfo.NodeSecret = v
 	}
-	if v, ok := data["rotation_interval"].(float64); ok {
+	if v, ok := toFloat64(data["rotation_interval"]); ok {
 		nodeInfo.RotationInterval = int(v)
 	}
 	if v, ok := data["masquerade"].(string); ok {
@@ -198,10 +208,10 @@ func (c *XboardClient) GetNodeInfo() (*NodeInfo, error) {
 	}
 
 	if baseConfig, ok := data["base_config"].(map[string]interface{}); ok {
-		if v, ok := baseConfig["push_interval"].(float64); ok {
+		if v, ok := toFloat64(baseConfig["push_interval"]); ok {
 			nodeInfo.PushInterval = int(v)
 		}
-		if v, ok := baseConfig["pull_interval"].(float64); ok {
+		if v, ok := toFloat64(baseConfig["pull_interval"]); ok {
 			nodeInfo.PullInterval = int(v)
 		}
 	}
@@ -353,22 +363,22 @@ func (c *XboardClient) GetUserList() ([]UserInfo, error) {
 	for _, item := range data {
 		if userMap, ok := item.(map[string]interface{}); ok {
 			u := UserInfo{}
-			if v, ok := userMap["id"].(float64); ok {
+			if v, ok := toFloat64(userMap["id"]); ok {
 				u.ID = int(v)
 			}
 			if v, ok := userMap["uuid"].(string); ok {
 				u.UUID = v
 			}
-			if v, ok := userMap["speed_limit"].(float64); ok {
+			if v, ok := toFloat64(userMap["speed_limit"]); ok {
 				u.SpeedLimit = v
 			}
-			if v, ok := userMap["device_limit"].(float64); ok {
+			if v, ok := toFloat64(userMap["device_limit"]); ok {
 				u.DeviceLimit = int(v)
 			}
 			if v, ok := userMap["dynamic_password"].(string); ok {
 				u.DynamicPassword = v
 			}
-			if v, ok := userMap["password_expires_at"].(float64); ok {
+			if v, ok := toFloat64(userMap["password_expires_at"]); ok {
 				u.PasswordExpiresAt = int64(v)
 			}
 			users = append(users, u)
