@@ -506,10 +506,10 @@ type MemoryStatus struct {
 	Used  int64 `json:"used"`
 }
 
-func (c *XboardClient) ReportStatus(status map[string]interface{}) error {
+func (c *XboardClient) ReportStatus(status, metrics map[string]interface{}) error {
 	url := fmt.Sprintf("%s/api/v2/server/report?node_id=%s&node_type=%s&token=%s",
 		c.apiHost, c.nodeID, c.nodeType, c.apiKey)
-	return c.doPost(url, map[string]interface{}{"status": status})
+	return c.doPost(url, map[string]interface{}{"status": status, "metrics": metrics})
 }
 
 func (c *XboardClient) GetAliveList() (map[string]int, error) {

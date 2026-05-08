@@ -711,9 +711,27 @@ func (s *XboardSync) reportNodeStatus() {
 	}
 
 	diskUsedGB, diskTotalGB := utils.GetDiskUsage()
+	netIn, netOut := utils.GetNetSpeed()
 
-	// Match Xboard panel expected format for HTTP /api/v2/server/report:
-	// { "status": { "cpu", "mem", "swap", "disk", "kernel_status" } }
+	activeConnections := 0
+	activeUsers := 0
+	if connData, err := s.collector.GetConnections(); err == nil && connData != nil {
+		activeConnections = connData.ActiveConnections
+	}
+	if stats, err := s.collector.GetStats(); err == nil && stats != nil {
+		activeUsers = len(stats.OnlineUsers)
+	}
+
+	var totalIn, totalOut int64
+	if traffic, err := s.collector.GetTraffic(); err == nil && traffic != nil {
+		totalIn = traffic.Upload
+		totalOut = traffic.Download
+	}
+
+	cpuPerCore, _ := utils.GetCPUPerCore()
+	load1, load5, load15 := utils.GetLoadAvg()
+	uptime := utils.GetUptime()
+
 	status := map[string]interface{}{
 		"cpu": cpuPercent,
 		"mem": map[string]interface{}{
@@ -729,9 +747,29 @@ func (s *XboardSync) reportNodeStatus() {
 			"used":  diskUsedGB,
 		},
 		"kernel_status": s.mgr.IsRunning(),
+		"online":        activeUsers,
 	}
 
-	if err := s.client.ReportStatus(status); err != nil {
+	metrics := map[string]interface{}{
+		"uptime":             uptime,
+		"goroutines":         activeConnections,
+		"active_connections": activeConnections,
+		"total_connections":  totalIn + totalOut,
+		"total_users":        activeUsers,
+		"active_users":       activeUsers,
+		"inbound_speed":      netIn,
+		"outbound_speed":     netOut,
+		"kernel_status":      s.mgr.IsRunning(),
+	}
+
+	if len(cpuPerCore) > 0 {
+		metrics["cpu_per_core"] = cpuPerCore
+	}
+	if load1 > 0 || load5 > 0 || load15 > 0 {
+		metrics["load"] = []float64{load1, load5, load15}
+	}
+
+	if err := s.client.ReportStatus(status, metrics); err != nil {
 		log.Printf("[xboard] failed to report status: %v", err)
 	}
 }
@@ -754,34 +792,39 @@ func (s *XboardSync) collectMetrics() map[string]interface{} {
 	diskUsedGB, _ := utils.GetDiskUsage()
 	netIn, netOut := utils.GetNetSpeed()
 
-	// Get active connections from stats collector
 	activeConnections := 0
+	activeUsers := 0
 	if connData, err := s.collector.GetConnections(); err == nil && connData != nil {
 		activeConnections = connData.ActiveConnections
 	}
+	if stats, err := s.collector.GetStats(); err == nil && stats != nil {
+		activeUsers = len(stats.OnlineUsers)
+	}
 
-	// Get cumulative traffic from stats collector
 	var totalIn, totalOut int64
 	if traffic, err := s.collector.GetTraffic(); err == nil && traffic != nil {
 		totalIn = traffic.Upload
 		totalOut = traffic.Download
 	}
 
-	// Match Xboard panel expected format:
-	// node_id, cpu, memory(MB), disk(GB), online, network_in(bytes), network_out(bytes),
-	// network_in_speed(bytes/s), network_out_speed(bytes/s)
+	uptime := utils.GetUptime()
+
 	result := map[string]interface{}{
-		"node_id":           s.cfg.Xboard.NodeID,
-		"api":               1, // API is running (we're in the metrics collector, so API is alive)
-		"kernel":            s.mgr.IsRunning(),
-		"cpu":               cpuPercent,
-		"memory":            float64(memUsedMB),
-		"disk":              float64(diskUsedGB),
-		"online":            activeConnections,
-		"network_in":        totalIn,
-		"network_out":       totalOut,
-		"network_in_speed":  netIn,
-		"network_out_speed": netOut,
+		"node_id":            s.cfg.Xboard.NodeID,
+		"cpu":                cpuPercent,
+		"memory":             float64(memUsedMB),
+		"disk":               float64(diskUsedGB),
+		"online":             activeUsers,
+		"network_in":         totalIn,
+		"network_out":        totalOut,
+		"network_in_speed":   netIn,
+		"network_out_speed":  netOut,
+		"uptime":             uptime,
+		"active_connections": activeConnections,
+		"total_connections":  totalIn + totalOut,
+		"active_users":       activeUsers,
+		"total_users":        activeUsers,
+		"kernel_status":      s.mgr.IsRunning(),
 	}
 
 	return result
