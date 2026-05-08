@@ -167,10 +167,14 @@ func (c *XboardClient) GetNodeInfo() (*NodeInfo, error) {
 	}
 	if v, ok := toFloat64(data["port"]); ok {
 		nodeInfo.Port = FlexibleInt(v)
+		log.Printf("[xboard] parsed port from 'port' field: %d", nodeInfo.Port)
 	}
 	if nodeInfo.Port == 0 {
 		if v, ok := toFloat64(data["server_port"]); ok {
 			nodeInfo.Port = FlexibleInt(v)
+			log.Printf("[xboard] parsed port from 'server_port' field: %d", nodeInfo.Port)
+		} else {
+			log.Printf("[xboard] WARNING: no port found in config response, server_port type: %T, value: %v", data["server_port"], data["server_port"])
 		}
 	}
 	if v, ok := data["server_name"].(string); ok {
