@@ -436,6 +436,7 @@ func deriveWSURLFromAPIHost(apiHost string) string {
 func (w *WSClient) handleMessage(msg wsMessage) {
 	switch msg.Event {
 	case "sync.config":
+		log.Printf("[xboard-ws] raw sync.config message: %s", string(msg.Data))
 		var payload struct {
 			Config    NodeInfo `json:"config"`
 			Timestamp int64    `json:"timestamp"`
@@ -445,9 +446,11 @@ func (w *WSClient) handleMessage(msg wsMessage) {
 			log.Printf("[xboard-ws] failed to parse sync.config: %v", err)
 			return
 		}
+		log.Printf("[xboard-ws] parsed config: port=%d, server_port=%d, host=%s", payload.Config.Port, payload.Config.ServerPort, payload.Config.Host)
 		// XBoard UniProxy配置使用`server_port`而不是`port`。
 		if payload.Config.Port == 0 && payload.Config.ServerPort > 0 {
 			payload.Config.Port = payload.Config.ServerPort
+			log.Printf("[xboard-ws] using server_port as port: %d", payload.Config.Port)
 		}
 		if w.onConfigUpdate != nil {
 			w.onConfigUpdate(&payload.Config, nil)
