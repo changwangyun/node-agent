@@ -155,7 +155,17 @@ func (c *XboardClient) GetNodeInfo() (*NodeInfo, error) {
 
 	log.Printf("[xboard] raw config response keys: %v", getMapKeys(raw))
 
+	// Xboard responses are not consistent across versions/panels:
+	// - some return config fields at the top level
+	// - others wrap them under { "data": { ... } } or { "config": { ... } }
 	data := raw
+	if v, ok := raw["data"].(map[string]interface{}); ok {
+		data = v
+		log.Printf("[xboard] using wrapped config: data (keys: %v)", getMapKeys(data))
+	} else if v, ok := raw["config"].(map[string]interface{}); ok {
+		data = v
+		log.Printf("[xboard] using wrapped config: config (keys: %v)", getMapKeys(data))
+	}
 
 	nodeInfo := &NodeInfo{}
 
@@ -165,16 +175,33 @@ func (c *XboardClient) GetNodeInfo() (*NodeInfo, error) {
 	if v, ok := data["server"].(string); ok && nodeInfo.Host == "" {
 		nodeInfo.Host = v
 	}
-	if v, ok := toFloat64(data["port"]); ok {
+	// Align with XBoard UniProxy output (ServerService::buildNodeConfig):
+	// port is provided as `server_port` (int). Some other panels use `port`.
+	if v, ok := toFloat64(data["server_port"]); ok {
+		nodeInfo.Port = FlexibleInt(v)
+		log.Printf("[xboard] parsed port from 'server_port' field: %d", nodeInfo.Port)
+	} else if v, ok := toFloat64(data["port"]); ok {
 		nodeInfo.Port = FlexibleInt(v)
 		log.Printf("[xboard] parsed port from 'port' field: %d", nodeInfo.Port)
+	} else {
+		log.Printf("[xboard] WARNING: no port found in config response (expected server_port or port). server_port type: %T, value: %v", data["server_port"], data["server_port"])
 	}
 	if nodeInfo.Port == 0 {
-		if v, ok := toFloat64(data["server_port"]); ok {
+		if v, ok := toFloat64(data["listen_port"]); ok {
 			nodeInfo.Port = FlexibleInt(v)
-			log.Printf("[xboard] parsed port from 'server_port' field: %d", nodeInfo.Port)
-		} else {
-			log.Printf("[xboard] WARNING: no port found in config response, server_port type: %T, value: %v", data["server_port"], data["server_port"])
+			log.Printf("[xboard] parsed port from 'listen_port' field: %d", nodeInfo.Port)
+		}
+	}
+	if nodeInfo.Port == 0 {
+		// Some panels put port inside protocol_settings.
+		if ps, ok := data["protocol_settings"].(map[string]interface{}); ok {
+			if v, ok := toFloat64(ps["port"]); ok {
+				nodeInfo.Port = FlexibleInt(v)
+				log.Printf("[xboard] parsed port from 'protocol_settings.port' field: %d", nodeInfo.Port)
+			} else if v, ok := toFloat64(ps["server_port"]); ok {
+				nodeInfo.Port = FlexibleInt(v)
+				log.Printf("[xboard] parsed port from 'protocol_settings.server_port' field: %d", nodeInfo.Port)
+			}
 		}
 	}
 	if v, ok := data["server_name"].(string); ok {
@@ -220,7 +247,10 @@ func (c *XboardClient) GetNodeInfo() (*NodeInfo, error) {
 		parseProtocolSettings(protocolSettings, nodeInfo)
 	}
 
-	if networkSettings, ok := data["network_settings"].(map[string]interface{}); ok {
+	// XBoard buildNodeConfig uses `networkSettings` (camelCase).
+	if networkSettings, ok := data["networkSettings"].(map[string]interface{}); ok {
+		parseNetworkSettings(networkSettings, nodeInfo)
+	} else if networkSettings, ok := data["network_settings"].(map[string]interface{}); ok {
 		parseNetworkSettings(networkSettings, nodeInfo)
 	}
 
