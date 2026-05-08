@@ -183,6 +183,7 @@ func (s *XboardSync) syncOnce() {
 	s.reportAlive()
 	s.reportTraffic()
 	s.reportNodeStatus()
+	s.reportDevices()
 }
 
 func (s *XboardSync) deployNode(nodeInfo *NodeInfo, users []UserInfo) {
@@ -792,6 +793,34 @@ func (s *XboardSync) reportNodeStatus() {
 	if err := s.client.ReportStatus(status, metrics); err != nil {
 		log.Printf("[xboard] failed to report status: %v", err)
 	}
+}
+
+func (s *XboardSync) reportDevices() {
+	stats, err := s.collector.GetStats()
+	if err != nil || stats == nil {
+		return
+	}
+
+	uuidToID := make(map[string]int)
+	for id, info := range s.lastUserMap {
+		uuidToID[info.UUID] = id
+	}
+
+	devices := make(map[int][]string)
+	for _, user := range stats.OnlineUsers {
+		if user.IP == "" {
+			continue
+		}
+		if id, ok := uuidToID[user.UserID]; ok {
+			devices[id] = append(devices[id], user.IP)
+		}
+	}
+
+	if len(devices) == 0 {
+		return
+	}
+
+	s.wsClient.SendDeviceReport(devices)
 }
 
 func (s *XboardSync) v2rayStats() *stats.V2RayStatsCollector {
