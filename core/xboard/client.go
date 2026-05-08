@@ -466,9 +466,9 @@ type MemoryStatus struct {
 	Used  int64 `json:"used"`
 }
 
-func (c *XboardClient) ReportStatus(status *NodeStatus) error {
-	url := c.buildURL("/status")
-	return c.doPost(url, status)
+func (c *XboardClient) ReportStatus(status map[string]interface{}) error {
+	url := c.buildURL("/report")
+	return c.doPost(url, map[string]interface{}{"status": status})
 }
 
 func (c *XboardClient) GetAliveList() (map[string]int, error) {

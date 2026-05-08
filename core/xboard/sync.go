@@ -677,8 +677,7 @@ func (s *XboardSync) reportNodeStatus() {
 		return
 	}
 
-	memPercent, memUsedMB, memTotalMB := utils.GetMemoryUsage()
-	_ = memPercent
+	_, memUsedMB, memTotalMB := utils.GetMemoryUsage()
 
 	swapUsedMB, swapTotalMB := uint64(0), uint64(0)
 	if v, err := mem.SwapMemory(); err == nil {
@@ -687,34 +686,24 @@ func (s *XboardSync) reportNodeStatus() {
 	}
 
 	diskUsedGB, diskTotalGB := utils.GetDiskUsage()
-	netIn, netOut := utils.GetNetSpeed()
-	gcMetrics := utils.GetGCMetrics()
 
-	status := &NodeStatus{
-		CPU: cpuPercent,
-		Mem: MemoryStatus{
-			Total: int64(memTotalMB) * 1024 * 1024,
-			Used:  int64(memUsedMB) * 1024 * 1024,
+	// Match Xboard panel expected format for HTTP /api/v2/server/report:
+	// { "status": { "cpu", "mem", "swap", "disk", "kernel_status" } }
+	status := map[string]interface{}{
+		"cpu": cpuPercent,
+		"mem": map[string]interface{}{
+			"total": memTotalMB,
+			"used":  memUsedMB,
 		},
-		NetInSpeed:  netIn,
-		NetOutSpeed: netOut,
-		Goroutines:  gcMetrics.Goroutines,
-		NumGC:       gcMetrics.NumGC,
-		LastPauseMS: gcMetrics.LastPauseMS,
-	}
-
-	if swapTotalMB > 0 {
-		status.Swap = MemoryStatus{
-			Total: int64(swapTotalMB) * 1024 * 1024,
-			Used:  int64(swapUsedMB) * 1024 * 1024,
-		}
-	}
-
-	if diskTotalGB > 0 {
-		status.Disk = MemoryStatus{
-			Total: int64(diskTotalGB) * 1024 * 1024 * 1024,
-			Used:  int64(diskUsedGB) * 1024 * 1024 * 1024,
-		}
+		"swap": map[string]interface{}{
+			"total": swapTotalMB,
+			"used":  swapUsedMB,
+		},
+		"disk": map[string]interface{}{
+			"total": diskTotalGB,
+			"used":  diskUsedGB,
+		},
+		"kernel_status": s.mgr.IsRunning(),
 	}
 
 	if err := s.client.ReportStatus(status); err != nil {
