@@ -320,6 +320,12 @@ func parseTLSSettings(tlsSettings map[string]interface{}, nodeInfo *NodeInfo) {
 	if v, ok := tlsSettings["key_path"].(string); ok {
 		nodeInfo.KeyPath = v
 	}
+	if v, ok := tlsSettings["cert_content"].(string); ok {
+		nodeInfo.CertContent = v
+	}
+	if v, ok := tlsSettings["key_content"].(string); ok {
+		nodeInfo.KeyContent = v
+	}
 	if v, ok := tlsSettings["acme_domain"].(string); ok {
 		nodeInfo.ACMEDomain = v
 	}

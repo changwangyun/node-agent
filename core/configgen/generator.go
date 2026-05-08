@@ -35,8 +35,10 @@ type DeployRequest struct {
 
 	Masquerade string `json:"masquerade,omitempty"`
 
-	TLSCertPath string `json:"tls_cert_path,omitempty"`
-	TLSKeyPath  string `json:"tls_key_path,omitempty"`
+	TLSCertPath    string `json:"tls_cert_path,omitempty"`
+	TLSKeyPath     string `json:"tls_key_path,omitempty"`
+	TLSCertContent string `json:"tls_cert_content,omitempty"`
+	TLSKeyContent  string `json:"tls_key_content,omitempty"`
 
 	ACMEDomain string `json:"acme_domain,omitempty"`
 	ACMEEmail  string `json:"acme_email,omitempty"`
@@ -381,7 +383,17 @@ func (g *Generator) rebuildConfig() (*SingBoxConfig, *ClientConfigResult, error)
 		keyPath := firstReq.TLSKeyPath
 		useACME := firstReq.ACMEDomain != ""
 
-		if firstReq.Protocol != "reality" && !useACME && (certPath == "" || keyPath == "") {
+		if firstReq.TLSCertContent != "" && firstReq.TLSKeyContent != "" {
+			dir := filepath.Dir(g.cfgPath)
+			certPath = filepath.Join(dir, "pushed-cert.pem")
+			keyPath = filepath.Join(dir, "pushed-key.pem")
+			if err := os.WriteFile(certPath, []byte(firstReq.TLSCertContent), 0644); err != nil {
+				return nil, nil, fmt.Errorf("write cert content: %w", err)
+			}
+			if err := os.WriteFile(keyPath, []byte(firstReq.TLSKeyContent), 0600); err != nil {
+				return nil, nil, fmt.Errorf("write key content: %w", err)
+			}
+		} else if firstReq.Protocol != "reality" && !useACME && (certPath == "" || keyPath == "") {
 			dir := filepath.Dir(g.cfgPath)
 			certPath = filepath.Join(dir, "self-signed-cert.pem")
 			keyPath = filepath.Join(dir, "self-signed-key.pem")
@@ -503,7 +515,19 @@ func (g *Generator) generate(req *DeployRequest) (*SingBoxConfig, *ClientConfigR
 	useACME := req.ACMEDomain != ""
 	useSelfSigned := false
 
-	if req.Protocol != "reality" && !useACME && (certPath == "" || keyPath == "") {
+	// Cert content push mode: write cert content to files
+	if req.TLSCertContent != "" && req.TLSKeyContent != "" {
+		dir := filepath.Dir(g.cfgPath)
+		certPath = filepath.Join(dir, "pushed-cert.pem")
+		keyPath = filepath.Join(dir, "pushed-key.pem")
+
+		if err := os.WriteFile(certPath, []byte(req.TLSCertContent), 0644); err != nil {
+			return nil, nil, fmt.Errorf("write cert content: %w", err)
+		}
+		if err := os.WriteFile(keyPath, []byte(req.TLSKeyContent), 0600); err != nil {
+			return nil, nil, fmt.Errorf("write key content: %w", err)
+		}
+	} else if req.Protocol != "reality" && !useACME && (certPath == "" || keyPath == "") {
 		dir := filepath.Dir(g.cfgPath)
 		certPath = filepath.Join(dir, "self-signed-cert.pem")
 		keyPath = filepath.Join(dir, "self-signed-key.pem")

@@ -416,6 +416,9 @@ func (s *XboardSync) buildDeployRequest(u UserInfo, nodeInfo *NodeInfo) *configg
 			if nodeInfo.ACMEDomain != "" {
 				req.ACMEDomain = nodeInfo.ACMEDomain
 				req.ACMEEmail = nodeInfo.ACMEEmail
+			} else if nodeInfo.CertContent != "" && nodeInfo.KeyContent != "" {
+				req.TLSCertContent = nodeInfo.CertContent
+				req.TLSKeyContent = nodeInfo.KeyContent
 			} else if nodeInfo.CertPath != "" {
 				req.TLSCertPath = nodeInfo.CertPath
 				req.TLSKeyPath = nodeInfo.KeyPath
@@ -432,6 +435,9 @@ func (s *XboardSync) buildDeployRequest(u UserInfo, nodeInfo *NodeInfo) *configg
 			if nodeInfo.ACMEDomain != "" {
 				req.ACMEDomain = nodeInfo.ACMEDomain
 				req.ACMEEmail = nodeInfo.ACMEEmail
+			} else if nodeInfo.CertContent != "" && nodeInfo.KeyContent != "" {
+				req.TLSCertContent = nodeInfo.CertContent
+				req.TLSKeyContent = nodeInfo.KeyContent
 			} else if nodeInfo.CertPath != "" {
 				req.TLSCertPath = nodeInfo.CertPath
 				req.TLSKeyPath = nodeInfo.KeyPath
@@ -473,6 +479,9 @@ func (s *XboardSync) buildDeployRequest(u UserInfo, nodeInfo *NodeInfo) *configg
 			if nodeInfo.ACMEDomain != "" {
 				req.ACMEDomain = nodeInfo.ACMEDomain
 				req.ACMEEmail = nodeInfo.ACMEEmail
+			} else if nodeInfo.CertContent != "" && nodeInfo.KeyContent != "" {
+				req.TLSCertContent = nodeInfo.CertContent
+				req.TLSKeyContent = nodeInfo.KeyContent
 			} else if nodeInfo.CertPath != "" {
 				req.TLSCertPath = nodeInfo.CertPath
 				req.TLSKeyPath = nodeInfo.KeyPath
@@ -807,10 +816,12 @@ type NodeInfo struct {
 	RealityDestHost   string `json:"dest_host"`
 	RealityDestPort   int    `json:"dest_port"`
 
-	CertPath   string `json:"cert_path"`
-	KeyPath    string `json:"key_path"`
-	ACMEDomain string `json:"acme_domain"`
-	ACMEEmail  string `json:"acme_email"`
+	CertPath    string `json:"cert_path"`
+	KeyPath     string `json:"key_path"`
+	CertContent string `json:"cert_content"`
+	KeyContent  string `json:"key_content"`
+	ACMEDomain  string `json:"acme_domain"`
+	ACMEEmail   string `json:"acme_email"`
 
 	WSPath          string                 `json:"ws_path"`
 	WSHost          string                 `json:"ws_host"`
