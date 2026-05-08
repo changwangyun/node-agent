@@ -584,6 +584,9 @@ func (s *XboardSync) reportTraffic() {
 
 	cumTraffic := make(map[string][2]int64, len(allTraffic))
 	for _, us := range allTraffic {
+		if strings.HasPrefix(us.UserID, "outbound:") {
+			continue
+		}
 		cumTraffic[us.UserID] = [2]int64{us.Upload, us.Download}
 	}
 
