@@ -967,6 +967,14 @@ case "${1:-}" in
         shift
         do_uninstall "$@"
         ;;
+    setup|reconfigure)
+        shift
+        check_root
+        banner
+        info "重新配置 Node Agent"
+        install_config
+        ok "配置已完成，请重启服务: systemctl restart node-agent"
+        ;;
     install|"")
         shift 2>/dev/null || true
         do_install "$@"

@@ -40,8 +40,7 @@ func main() {
 	}
 
 	if cfg.Xboard.APIHost == "" && cfg.PanelType != "xboard" {
-		log.Printf("[main] WARNING: xboard mode not configured (api_host is empty)")
-		log.Printf("[main] Please edit %s and set panel_type to 'xboard' and fill xboard.api_host", *configPath)
+		log.Fatalf("[main] xboard mode not configured. Please run: sudo /usr/local/bin/node-agent-setup")
 	}
 
 	if err := os.MkdirAll(cfg.DataDir, 0755); err != nil {
