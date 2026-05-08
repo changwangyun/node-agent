@@ -758,6 +758,8 @@ func (s *XboardSync) collectMetrics() map[string]interface{} {
 	// network_in_speed(bytes/s), network_out_speed(bytes/s)
 	result := map[string]interface{}{
 		"node_id":           s.cfg.Xboard.NodeID,
+		"api":               1, // API is running (we're in the metrics collector, so API is alive)
+		"kernel":            s.mgr.IsRunning(),
 		"cpu":               cpuPercent,
 		"memory":            float64(memUsedMB),
 		"disk":              float64(diskUsedGB),
