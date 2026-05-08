@@ -267,6 +267,8 @@ func (c *XboardClient) GetNodeInfo() (*NodeInfo, error) {
 		cc := &CertConfig{}
 		if v, ok := certConfig["cert_mode"].(string); ok {
 			cc.CertMode = v
+		} else if v, ok := certConfig["mode"].(string); ok {
+			cc.CertMode = v
 		}
 		if v, ok := certConfig["cert_file"].(string); ok {
 			cc.CertFile = v
@@ -295,6 +297,8 @@ func (c *XboardClient) GetNodeInfo() (*NodeInfo, error) {
 			cc.ACME = ac
 		}
 		nodeInfo.CertConfig = cc
+		log.Printf("[xboard] parsed cert_config: mode=%s, cert_file=%s, key_file=%s, has_cert_content=%v, has_acme=%v",
+			cc.CertMode, cc.CertFile, cc.KeyFile, cc.CertContent != "", cc.ACME != nil)
 	}
 
 	if routes, ok := data["routes"].([]interface{}); ok {

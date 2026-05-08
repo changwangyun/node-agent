@@ -364,11 +364,19 @@ func (s *XboardSync) isNodeConfigChanged(newInfo *NodeInfo) bool {
 }
 
 func (s *XboardSync) applyCertConfig(nodeInfo *NodeInfo, req *configgen.DeployRequest) {
-	if nodeInfo.CertConfig == nil || nodeInfo.CertConfig.CertMode == "none" {
+	if nodeInfo.CertConfig == nil {
+		log.Printf("[xboard] cert_config is nil, skipping")
+		return
+	}
+	if nodeInfo.CertConfig.CertMode == "none" {
+		log.Printf("[xboard] cert_mode is none, skipping")
 		return
 	}
 
 	cc := nodeInfo.CertConfig
+	log.Printf("[xboard] applying cert_config: mode=%s, cert_file=%s, key_file=%s, has_cert_content=%v",
+		cc.CertMode, cc.CertFile, cc.KeyFile, cc.CertContent != "")
+
 	switch cc.CertMode {
 	case "acme":
 		if cc.ACME != nil {
@@ -376,27 +384,35 @@ func (s *XboardSync) applyCertConfig(nodeInfo *NodeInfo, req *configgen.DeployRe
 				req.ACMEDomain = cc.ACME.Domains[0]
 			}
 			req.ACMEEmail = cc.ACME.Email
+			log.Printf("[xboard] using acme mode: domain=%s", req.ACMEDomain)
 		}
 	case "remote":
 		if cc.CertFile != "" && cc.KeyFile != "" {
 			req.TLSCertPath = cc.CertFile
 			req.TLSKeyPath = cc.KeyFile
+			log.Printf("[xboard] using remote mode: cert=%s, key=%s", cc.CertFile, cc.KeyFile)
 		}
 	case "local":
 		if cc.CertContent != "" && cc.KeyContent != "" {
 			req.TLSCertContent = cc.CertContent
 			req.TLSKeyContent = cc.KeyContent
+			log.Printf("[xboard] using local mode: content length cert=%d, key=%d", len(cc.CertContent), len(cc.KeyContent))
 		}
 	default:
 		if cc.CertContent != "" && cc.KeyContent != "" {
 			req.TLSCertContent = cc.CertContent
 			req.TLSKeyContent = cc.KeyContent
+			log.Printf("[xboard] using default mode with content: cert=%d, key=%d", len(cc.CertContent), len(cc.KeyContent))
 		} else if cc.CertFile != "" && cc.KeyFile != "" {
 			req.TLSCertPath = cc.CertFile
 			req.TLSKeyPath = cc.KeyFile
+			log.Printf("[xboard] using default mode with path: cert=%s, key=%s", cc.CertFile, cc.KeyFile)
 		} else if cc.ACME != nil && len(cc.ACME.Domains) > 0 {
 			req.ACMEDomain = cc.ACME.Domains[0]
 			req.ACMEEmail = cc.ACME.Email
+			log.Printf("[xboard] using default mode with acme: domain=%s", req.ACMEDomain)
+		} else {
+			log.Printf("[xboard] cert_config mode=%s but no valid cert data found", cc.CertMode)
 		}
 	}
 }
@@ -455,9 +471,7 @@ func (s *XboardSync) buildDeployRequest(u UserInfo, nodeInfo *NodeInfo) *configg
 		if nodeInfo.Masquerade != "" {
 			req.Masquerade = nodeInfo.Masquerade
 		}
-		if nodeInfo.TLS == 1 {
-			s.applyCertConfig(nodeInfo, req)
-		}
+		s.applyCertConfig(nodeInfo, req)
 		if nodeInfo.ObfsType != "" {
 			req.ObfsType = nodeInfo.ObfsType
 			req.ObfsPass = nodeInfo.ObfsPass
@@ -465,9 +479,7 @@ func (s *XboardSync) buildDeployRequest(u UserInfo, nodeInfo *NodeInfo) *configg
 
 	case "vless":
 		req.Protocol = "vless"
-		if nodeInfo.TLS == 1 {
-			s.applyCertConfig(nodeInfo, req)
-		}
+		s.applyCertConfig(nodeInfo, req)
 		if nodeInfo.Network == "ws" {
 			req.ObfsType = "ws"
 			req.ObfsPass = nodeInfo.WSHost
@@ -500,9 +512,7 @@ func (s *XboardSync) buildDeployRequest(u UserInfo, nodeInfo *NodeInfo) *configg
 
 	case "trojan":
 		req.Protocol = "trojan"
-		if nodeInfo.TLS == 1 {
-			s.applyCertConfig(nodeInfo, req)
-		}
+		s.applyCertConfig(nodeInfo, req)
 		if nodeInfo.ObfsType != "" {
 			req.ObfsType = nodeInfo.ObfsType
 			req.ObfsPass = nodeInfo.ObfsPass
