@@ -184,6 +184,17 @@ func (s *XboardSync) syncOnce() {
 }
 
 func (s *XboardSync) deployNode(nodeInfo *NodeInfo, users []UserInfo) {
+	// If port is missing (0), sing-box will bind a random port, which breaks panel expectations.
+	if nodeInfo == nil || int(nodeInfo.Port) <= 0 {
+		log.Printf("[xboard] ERROR: invalid/missing node port in config (port=%v). Refusing to deploy to avoid random listen_port.", func() interface{} {
+			if nodeInfo == nil {
+				return nil
+			}
+			return int(nodeInfo.Port)
+		}())
+		return
+	}
+
 	currentUserMap := make(map[int]*UserInfo)
 	for i := range users {
 		currentUserMap[users[i].ID] = &users[i]
@@ -801,6 +812,7 @@ func (s *XboardSync) wsDiscovery() {
 type NodeInfo struct {
 	Host             string        `json:"host"`
 	Port             FlexibleInt   `json:"port"`
+	ServerPort       FlexibleInt   `json:"server_port"`
 	ServerName       string        `json:"server_name"`
 	SNI              string        `json:"sni"`
 	Transport        string        `json:"transport"`
