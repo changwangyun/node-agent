@@ -445,6 +445,10 @@ func (w *WSClient) handleMessage(msg wsMessage) {
 			log.Printf("[xboard-ws] failed to parse sync.config: %v", err)
 			return
 		}
+		// XBoard UniProxy配置使用`server_port`而不是`port`。
+		if payload.Config.Port == 0 && payload.Config.ServerPort > 0 {
+			payload.Config.Port = payload.Config.ServerPort
+		}
 		if w.onConfigUpdate != nil {
 			w.onConfigUpdate(&payload.Config, nil)
 		}
