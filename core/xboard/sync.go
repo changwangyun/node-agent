@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"log"
 	"strconv"
@@ -21,6 +22,25 @@ import (
 
 	"github.com/shirou/gopsutil/v3/mem"
 )
+
+type FlexibleInt int
+
+func (f *FlexibleInt) UnmarshalJSON(data []byte) error {
+	if len(data) >= 2 && (data[0] == '"' || data[0] == '\'') {
+		var s string
+		if err := json.Unmarshal(data, &s); err == nil {
+			if v, err := strconv.Atoi(s); err == nil {
+				*f = FlexibleInt(v)
+				return nil
+			}
+		}
+	}
+	var v int
+	if err := json.Unmarshal(data, &v); err == nil {
+		*f = FlexibleInt(v)
+	}
+	return nil
+}
 
 type XboardSync struct {
 	cfg       *config.Config
@@ -344,7 +364,7 @@ func (s *XboardSync) buildDeployRequest(u UserInfo, nodeInfo *NodeInfo) *configg
 		NodeID:      s.cfg.Xboard.NodeID.String(),
 		Protocol:    s.mapNodeType(s.cfg.Xboard.NodeType),
 		Server:      nodeInfo.Host,
-		Port:        nodeInfo.Port,
+		Port:        int(nodeInfo.Port),
 		Password:    password,
 		UUID:        uuid,
 		DeviceLimit: u.DeviceLimit,
@@ -780,7 +800,7 @@ func (s *XboardSync) wsDiscovery() {
 
 type NodeInfo struct {
 	Host             string        `json:"host"`
-	Port             int           `json:"port"`
+	Port             FlexibleInt   `json:"port"`
 	ServerName       string        `json:"server_name"`
 	SNI              string        `json:"sni"`
 	Transport        string        `json:"transport"`

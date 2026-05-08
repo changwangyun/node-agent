@@ -137,10 +137,18 @@ func (c *XboardClient) GetNodeInfo() (*NodeInfo, error) {
 		nodeInfo.Host = v
 	}
 	if v, ok := data["port"].(float64); ok {
-		nodeInfo.Port = int(v)
+		nodeInfo.Port = FlexibleInt(v)
+	} else if v, ok := data["port"].(string); ok {
+		if p, err := strconv.Atoi(v); err == nil {
+			nodeInfo.Port = FlexibleInt(p)
+		}
 	}
 	if v, ok := data["server_port"].(float64); ok && nodeInfo.Port == 0 {
-		nodeInfo.Port = int(v)
+		nodeInfo.Port = FlexibleInt(v)
+	} else if v, ok := data["server_port"].(string); ok && nodeInfo.Port == 0 {
+		if p, err := strconv.Atoi(v); err == nil {
+			nodeInfo.Port = FlexibleInt(p)
+		}
 	}
 	if v, ok := data["server_name"].(string); ok {
 		nodeInfo.ServerName = v
