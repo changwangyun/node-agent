@@ -370,9 +370,13 @@ func (c *XboardClient) GetUserList() ([]UserInfo, error) {
 	return users, nil
 }
 
-func (c *XboardClient) ReportUserTraffic(trafficData map[string][2]int64) error {
+func (c *XboardClient) ReportUserTraffic(trafficData map[int][2]int64) error {
 	url := c.buildURL("/push")
-	return c.doPost(url, trafficData)
+	payload := make(map[string]interface{}, len(trafficData))
+	for uid, d := range trafficData {
+		payload[strconv.Itoa(uid)] = d
+	}
+	return c.doPost(url, payload)
 }
 
 func (c *XboardClient) ReportAliveWithIPs(payload interface{}) error {

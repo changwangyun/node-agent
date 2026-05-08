@@ -598,11 +598,41 @@ func (s *XboardSync) reportTraffic() {
 		return
 	}
 
-	if err := s.client.ReportUserTraffic(trafficData); err != nil {
+	uuidToID := make(map[string]int, len(s.lastUserMap))
+	for id, info := range s.lastUserMap {
+		uuidToID[info.UUID] = id
+	}
+
+	intTrafficData := make(map[int][2]int64, len(trafficData))
+	for uuid, data := range trafficData {
+		if id, ok := uuidToID[uuid]; ok {
+			intTrafficData[id] = data
+		} else {
+			log.Printf("[xboard] traffic for unknown user %s, skipping", uuid)
+		}
+	}
+
+	if len(intTrafficData) == 0 {
+		return
+	}
+
+	if err := s.client.ReportUserTraffic(intTrafficData); err != nil {
 		log.Printf("[xboard] failed to report traffic: %v", err)
+		for id, data := range intTrafficData {
+			uuid := ""
+			for u, i := range uuidToID {
+				if i == id {
+					uuid = u
+					break
+				}
+			}
+			if uuid != "" {
+				trafficData[uuid] = data
+			}
+		}
 		s.tracker.RestoreTraffic(trafficData)
 	} else {
-		log.Printf("[xboard] reported traffic for %d users", len(trafficData))
+		log.Printf("[xboard] reported traffic for %d users", len(intTrafficData))
 	}
 }
 
