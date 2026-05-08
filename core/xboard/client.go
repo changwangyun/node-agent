@@ -507,7 +507,8 @@ type MemoryStatus struct {
 }
 
 func (c *XboardClient) ReportStatus(status map[string]interface{}) error {
-	url := c.buildURL("/report")
+	url := fmt.Sprintf("%s/api/v2/server/report?node_id=%s&node_type=%s&token=%s",
+		c.apiHost, c.nodeID, c.nodeType, c.apiKey)
 	return c.doPost(url, map[string]interface{}{"status": status})
 }
 
