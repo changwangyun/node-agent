@@ -352,15 +352,24 @@ func (s *XboardSync) isNodeConfigChanged(newInfo *NodeInfo) bool {
 		old.Masquerade != newInfo.Masquerade ||
 		old.ObfsType != newInfo.ObfsType ||
 		old.ObfsPass != newInfo.ObfsPass ||
-		old.CertPath != newInfo.CertPath ||
-		old.KeyPath != newInfo.KeyPath ||
-		old.ACMEDomain != newInfo.ACMEDomain ||
-		old.ACMEEmail != newInfo.ACMEEmail ||
-		old.CertConfig != nil && newInfo.CertConfig != nil && (old.CertConfig.CertMode != newInfo.CertConfig.CertMode ||
-			old.CertConfig.CertFile != newInfo.CertConfig.CertFile ||
-			old.CertConfig.KeyFile != newInfo.CertConfig.KeyFile ||
-			old.CertConfig.CertContent != newInfo.CertConfig.CertContent ||
-			old.CertConfig.KeyContent != newInfo.CertConfig.KeyContent)
+		certConfigChanged(old.CertConfig, newInfo.CertConfig)
+}
+
+func certConfigChanged(old, new *CertConfig) bool {
+	if old == nil && new == nil {
+		return false
+	}
+	if old == nil || new == nil {
+		return true
+	}
+	return old.CertMode != new.CertMode ||
+		old.Domain != new.Domain ||
+		old.Email != new.Email ||
+		old.HTTPPort != new.HTTPPort ||
+		old.DNSProvider != new.DNSProvider ||
+		old.DNSEnv != new.DNSEnv ||
+		old.CertContent != new.CertContent ||
+		old.KeyContent != new.KeyContent
 }
 
 func (s *XboardSync) applyCertConfig(nodeInfo *NodeInfo, req *configgen.DeployRequest) {
@@ -374,46 +383,45 @@ func (s *XboardSync) applyCertConfig(nodeInfo *NodeInfo, req *configgen.DeployRe
 	}
 
 	cc := nodeInfo.CertConfig
-	log.Printf("[xboard] applying cert_config: mode=%s, cert_file=%s, key_file=%s, has_cert_content=%v",
-		cc.CertMode, cc.CertFile, cc.KeyFile, cc.CertContent != "")
+	log.Printf("[xboard] applying cert_config: mode=%s, domain=%s, has_cert_content=%v",
+		cc.CertMode, cc.Domain, cc.CertContent != "")
 
 	switch cc.CertMode {
-	case "acme":
-		if cc.ACME != nil {
-			if len(cc.ACME.Domains) > 0 {
-				req.ACMEDomain = cc.ACME.Domains[0]
-			}
-			req.ACMEEmail = cc.ACME.Email
-			log.Printf("[xboard] using acme mode: domain=%s", req.ACMEDomain)
+	case "self":
+		// Node auto-generates self-signed cert with domain
+		if cc.Domain != "" {
+			req.SNI = cc.Domain
 		}
-	case "remote":
-		if cc.CertFile != "" && cc.KeyFile != "" {
-			req.TLSCertPath = cc.CertFile
-			req.TLSKeyPath = cc.KeyFile
-			log.Printf("[xboard] using remote mode: cert=%s, key=%s", cc.CertFile, cc.KeyFile)
+		log.Printf("[xboard] using self mode: domain=%s (auto-generate self-signed cert)", cc.Domain)
+	case "http":
+		// ACME HTTP-01 challenge
+		if cc.Domain != "" {
+			req.ACMEDomain = cc.Domain
 		}
-	case "local":
+		if cc.Email != "" {
+			req.ACMEEmail = cc.Email
+		}
+		log.Printf("[xboard] using http mode: domain=%s, email=%s, http_port=%d", cc.Domain, cc.Email, cc.HTTPPort)
+	case "dns":
+		// ACME DNS-01 challenge
+		if cc.Domain != "" {
+			req.ACMEDomain = cc.Domain
+		}
+		if cc.Email != "" {
+			req.ACMEEmail = cc.Email
+		}
+		log.Printf("[xboard] using dns mode: domain=%s, email=%s, dns_provider=%s", cc.Domain, cc.Email, cc.DNSProvider)
+	case "content":
+		// Direct cert content push
 		if cc.CertContent != "" && cc.KeyContent != "" {
 			req.TLSCertContent = cc.CertContent
 			req.TLSKeyContent = cc.KeyContent
-			log.Printf("[xboard] using local mode: content length cert=%d, key=%d", len(cc.CertContent), len(cc.KeyContent))
+			log.Printf("[xboard] using content mode: cert=%d bytes, key=%d bytes", len(cc.CertContent), len(cc.KeyContent))
+		} else {
+			log.Printf("[xboard] cert_config mode=content but missing cert_content or key_content")
 		}
 	default:
-		if cc.CertContent != "" && cc.KeyContent != "" {
-			req.TLSCertContent = cc.CertContent
-			req.TLSKeyContent = cc.KeyContent
-			log.Printf("[xboard] using default mode with content: cert=%d, key=%d", len(cc.CertContent), len(cc.KeyContent))
-		} else if cc.CertFile != "" && cc.KeyFile != "" {
-			req.TLSCertPath = cc.CertFile
-			req.TLSKeyPath = cc.KeyFile
-			log.Printf("[xboard] using default mode with path: cert=%s, key=%s", cc.CertFile, cc.KeyFile)
-		} else if cc.ACME != nil && len(cc.ACME.Domains) > 0 {
-			req.ACMEDomain = cc.ACME.Domains[0]
-			req.ACMEEmail = cc.ACME.Email
-			log.Printf("[xboard] using default mode with acme: domain=%s", req.ACMEDomain)
-		} else {
-			log.Printf("[xboard] cert_config mode=%s but no valid cert data found", cc.CertMode)
-		}
+		log.Printf("[xboard] unknown cert_mode=%s, skipping", cc.CertMode)
 	}
 }
 
@@ -904,17 +912,14 @@ type NodeInfo struct {
 }
 
 type CertConfig struct {
-	CertMode    string      `json:"cert_mode"`
-	CertFile    string      `json:"cert_file"`
-	KeyFile     string      `json:"key_file"`
-	CertContent string      `json:"cert_content"`
-	KeyContent  string      `json:"key_content"`
-	ACME        *ACMEConfig `json:"acme"`
-}
-
-type ACMEConfig struct {
-	Domains []string `json:"domains"`
-	Email   string   `json:"email"`
+	CertMode    string `json:"cert_mode"`
+	Domain      string `json:"domain"`
+	Email       string `json:"email"`
+	HTTPPort    int    `json:"http_port"`
+	DNSProvider string `json:"dns_provider"`
+	DNSEnv      string `json:"dns_env"`
+	CertContent string `json:"cert_content"`
+	KeyContent  string `json:"key_content"`
 }
 
 type RouteConfig struct {

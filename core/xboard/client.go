@@ -270,11 +270,20 @@ func (c *XboardClient) GetNodeInfo() (*NodeInfo, error) {
 		} else if v, ok := certConfig["mode"].(string); ok {
 			cc.CertMode = v
 		}
-		if v, ok := certConfig["cert_file"].(string); ok {
-			cc.CertFile = v
+		if v, ok := certConfig["domain"].(string); ok {
+			cc.Domain = v
 		}
-		if v, ok := certConfig["key_file"].(string); ok {
-			cc.KeyFile = v
+		if v, ok := certConfig["email"].(string); ok {
+			cc.Email = v
+		}
+		if v, ok := certConfig["http_port"].(float64); ok {
+			cc.HTTPPort = int(v)
+		}
+		if v, ok := certConfig["dns_provider"].(string); ok {
+			cc.DNSProvider = v
+		}
+		if v, ok := certConfig["dns_env"].(string); ok {
+			cc.DNSEnv = v
 		}
 		if v, ok := certConfig["cert_content"].(string); ok {
 			cc.CertContent = v
@@ -282,23 +291,9 @@ func (c *XboardClient) GetNodeInfo() (*NodeInfo, error) {
 		if v, ok := certConfig["key_content"].(string); ok {
 			cc.KeyContent = v
 		}
-		if acme, ok := certConfig["acme"].(map[string]interface{}); ok {
-			ac := &ACMEConfig{}
-			if v, ok := acme["email"].(string); ok {
-				ac.Email = v
-			}
-			if domains, ok := acme["domains"].([]interface{}); ok {
-				for _, d := range domains {
-					if ds, ok := d.(string); ok {
-						ac.Domains = append(ac.Domains, ds)
-					}
-				}
-			}
-			cc.ACME = ac
-		}
 		nodeInfo.CertConfig = cc
-		log.Printf("[xboard] parsed cert_config: mode=%s, cert_file=%s, key_file=%s, has_cert_content=%v, has_acme=%v",
-			cc.CertMode, cc.CertFile, cc.KeyFile, cc.CertContent != "", cc.ACME != nil)
+		log.Printf("[xboard] parsed cert_config: mode=%s, domain=%s, has_cert_content=%v",
+			cc.CertMode, cc.Domain, cc.CertContent != "")
 	}
 
 	if routes, ok := data["routes"].([]interface{}); ok {
