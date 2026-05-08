@@ -750,6 +750,12 @@ func (s *XboardSync) collectMetrics() map[string]interface{} {
 
 	load1, load5, load15 := utils.GetLoadAvg()
 
+	// Get active connections from stats collector
+	activeConnections := 0
+	if connData, err := s.collector.GetConnections(); err == nil && connData != nil {
+		activeConnections = connData.ActiveConnections
+	}
+
 	result := map[string]interface{}{
 		"cpu":         cpuPercent,
 		"cpu_percent": cpuPercent,
@@ -762,6 +768,8 @@ func (s *XboardSync) collectMetrics() map[string]interface{} {
 		"mem_total_mb":   memTotalMB,
 		"net_in_speed":   netIn,
 		"net_out_speed":  netOut,
+		"online_users":   activeConnections,
+		"connections":    activeConnections,
 		"goroutines":     gcMetrics.Goroutines,
 		"num_gc":         gcMetrics.NumGC,
 		"last_pause_ms":  gcMetrics.LastPauseMS,
