@@ -39,6 +39,11 @@ func main() {
 		log.Fatalf("[main] load config: %v", err)
 	}
 
+	if cfg.Xboard.APIHost == "" && cfg.PanelType != "xboard" {
+		log.Printf("[main] WARNING: xboard mode not configured (api_host is empty)")
+		log.Printf("[main] Please edit %s and set panel_type to 'xboard' and fill xboard.api_host", *configPath)
+	}
+
 	if err := os.MkdirAll(cfg.DataDir, 0755); err != nil {
 		log.Fatalf("[main] create data dir: %v", err)
 	}
