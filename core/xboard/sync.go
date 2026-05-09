@@ -116,9 +116,15 @@ func (s *XboardSync) Start() {
 		select {
 		case <-ticker.C:
 			if s.wsClient.IsConnected() {
+				s.mu.Lock()
+				if s.totalUsers == 0 && len(s.lastUsers) > 0 {
+					s.totalUsers = len(s.lastUsers)
+				}
+				s.mu.Unlock()
 				s.reportAlive()
 				s.reportTraffic()
 				s.reportNodeStatus()
+				s.reportDevices()
 				continue
 			}
 			s.syncOnce()
@@ -142,13 +148,18 @@ func (s *XboardSync) onWSConfigUpdate(nodeInfo *NodeInfo, users []UserInfo) {
 	s.wsConnected = true
 
 	if nodeInfo != nil {
-		s.totalUsers = len(users)
+		if len(users) > 0 {
+			s.totalUsers = len(users)
+			s.lastUsers = users
+		}
 		s.deployNode(nodeInfo, users)
 	} else if len(users) > 0 && s.lastNodeInfo != nil {
+		s.totalUsers = len(users)
+		s.lastUsers = users
 		s.deployNode(s.lastNodeInfo, users)
 	}
 
-	log.Printf("[xboard] ws config update received")
+	log.Printf("[xboard] ws config update received, totalUsers=%d", s.totalUsers)
 }
 
 func (s *XboardSync) onWSDisconnected() {
@@ -856,6 +867,10 @@ func (s *XboardSync) v2rayStats() *stats.V2RayStatsCollector {
 }
 
 func (s *XboardSync) collectMetrics() map[string]interface{} {
+	s.mu.Lock()
+	totalUsers := s.totalUsers
+	s.mu.Unlock()
+
 	cpuPercent, err := utils.GetCPUUsage()
 	if err != nil {
 		cpuPercent = 0
@@ -894,7 +909,7 @@ func (s *XboardSync) collectMetrics() map[string]interface{} {
 			"goroutines":         runtime.NumGoroutine(),
 			"active_connections": activeConnections,
 			"total_connections":  totalIn + totalOut,
-			"total_users":        s.totalUsers,
+			"total_users":        totalUsers,
 			"active_users":       activeUsers,
 			"inbound_speed":      netIn,
 			"outbound_speed":     netOut,
